@@ -1,0 +1,51 @@
+name: Build and Deploy Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_run:
+    workflows: [Update Market Data]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  build-deploy:
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source branch
+        uses: actions/checkout@v4
+
+      - name: Checkout market-data branch
+        uses: actions/checkout@v4
+        with:
+          ref: market-data
+          path: market-data-worktree
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync market data to public directory
+        run: node scripts/sync-market-data.mjs ./market-data-worktree ./public/market-data
+
+      - name: Test
+        run: npm run test:run
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_branch: gh-pages
+          publish_dir: ./dist
+          force_orphan: true
