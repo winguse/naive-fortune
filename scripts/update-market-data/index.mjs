@@ -7,11 +7,11 @@ const MARKET_DATA_LAYOUT = {
 }
 
 const CN_SECID = {
-  '159399': '0.159399',
-  '159222': '0.159222',
-  '563020': '1.563020',
-  '510050': '1.510050',
-  '510300': '1.510300',
+  159399: '0.159399',
+  159222: '0.159222',
+  563020: '1.563020',
+  510050: '1.510050',
+  510300: '1.510300',
 }
 
 const parseArgs = () => {
@@ -21,12 +21,18 @@ const parseArgs = () => {
     args.set(key, value ?? 'true')
   }
   return {
-    marketDir: args.get('--market-dir') ?? path.resolve(process.cwd(), 'public/market-data'),
+    marketDir:
+      args.get('--market-dir') ??
+      path.resolve(process.cwd(), 'public/market-data'),
     fixMode: args.get('--fix-mode') === 'true',
   }
 }
 
-const toCsv = (rows) => ['date,close,open', ...rows.map((row) => `${row.date},${row.close},${row.open ?? ''}`)].join('\n')
+const toCsv = (rows) =>
+  [
+    'date,close,open',
+    ...rows.map((row) => `${row.date},${row.close},${row.open ?? ''}`),
+  ].join('\n')
 
 const parseCsv = (csv) => {
   const lines = csv.trim().split(/\r?\n/)
@@ -35,10 +41,17 @@ const parseCsv = (csv) => {
     throw new Error('Invalid CSV header')
   }
 
-  return lines.slice(1).filter(Boolean).map((line) => {
-    const [date, close, open] = line.split(',')
-    return { date, close: Number(close), open: open === '' || open == null ? null : Number(open) }
-  })
+  return lines
+    .slice(1)
+    .filter(Boolean)
+    .map((line) => {
+      const [date, close, open] = line.split(',')
+      return {
+        date,
+        close: Number(close),
+        open: open === '' || open == null ? null : Number(open),
+      }
+    })
 }
 
 const validateRows = (rows) => {
@@ -46,19 +59,86 @@ const validateRows = (rows) => {
   const seen = new Set()
 
   for (const row of rows) {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date)) throw new Error(`Invalid date ${row.date}`)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(row.date))
+      throw new Error(`Invalid date ${row.date}`)
     if (seen.has(row.date)) throw new Error(`Duplicate date ${row.date}`)
-    if (prevDate && row.date < prevDate) throw new Error('Dates are not ascending')
+    if (prevDate && row.date < prevDate)
+      throw new Error('Dates are not ascending')
     if (!(row.close > 0)) throw new Error(`Invalid close for ${row.date}`)
-    if (!(row.open == null || row.open >= 0)) throw new Error(`Invalid open for ${row.date}`)
+    if (!(row.open == null || row.open >= 0))
+      throw new Error(`Invalid open for ${row.date}`)
     seen.add(row.date)
     prevDate = row.date
   }
 }
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+const RETRYABLE_ERROR_CODES = new Set([
+  'UND_ERR_SOCKET',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'ECONNRESET',
+  'ETIMEDOUT',
+  'EAI_AGAIN',
+])
+
+const DEFAULT_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.5 Safari/605.1.15'
+
+const isRetryableFetchError = (error) => {
+  if (error?.name === 'AbortError') return true
+  const code = error?.cause?.code ?? error?.code
+  return RETRYABLE_ERROR_CODES.has(code)
+}
+
+const fetchWithRetry = async (
+  url,
+  { label, retries = 4, timeoutMs = 12000, headers } = {},
+) => {
+  let lastError = null
+
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const response = await fetch(url, {
+        signal: controller.signal,
+        headers: {
+          'User-Agent': DEFAULT_USER_AGENT,
+          ...headers,
+        },
+      })
+
+      if (
+        (response.status === 429 || response.status >= 500) &&
+        attempt < retries
+      ) {
+        await sleep(attempt * 400)
+        continue
+      }
+
+      return response
+    } catch (error) {
+      lastError = error
+      if (attempt === retries || !isRetryableFetchError(error)) {
+        throw error
+      }
+      await sleep(attempt * 400)
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  throw lastError ?? new Error(`Failed to fetch ${label ?? url}`)
+}
+
 const fetchUSFromStooq = async (code) => {
   const url = `https://stooq.com/q/d/l/?s=${code.toLowerCase()}.us&i=d`
-  const response = await fetch(url)
+  const response = await fetchWithRetry(url, {
+    label: `US ${code} from stooq`,
+  })
   if (!response.ok) throw new Error(`Failed to fetch US ${code} from stooq`)
   const text = await response.text()
   const lines = text.trim().split(/\r?\n/).slice(1)
@@ -76,13 +156,21 @@ const fetchUSFromYahoo = async (code) => {
   const end = new Date()
   const rowsByDate = new Map()
 
-  for (let current = new Date(start); current <= end; current.setUTCFullYear(current.getUTCFullYear() + 2)) {
+  for (
+    let current = new Date(start);
+    current <= end;
+    current.setUTCFullYear(current.getUTCFullYear() + 2)
+  ) {
     const period1 = Math.floor(current.getTime() / 1000)
     const periodEnd = new Date(current)
     periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 2)
-    const period2 = Math.floor(Math.min(periodEnd.getTime(), end.getTime()) / 1000)
+    const period2 = Math.floor(
+      Math.min(periodEnd.getTime(), end.getTime()) / 1000,
+    )
     const url = `https://query1.finance.yahoo.com/v8/finance/chart/${code}?period1=${period1}&period2=${period2}&interval=1d&includePrePost=false&events=history`
-    const response = await fetch(url)
+    const response = await fetchWithRetry(url, {
+      label: `US ${code} from yahoo`,
+    })
     if (!response.ok) {
       const payload = await response.json().catch(() => null)
       const message = payload?.chart?.error?.description ?? ''
@@ -99,7 +187,8 @@ const fetchUSFromYahoo = async (code) => {
       const ts = timestamps[index]
       const date = new Date(ts * 1000).toISOString().slice(0, 10)
       const close = Number(quote.close?.[index])
-      const open = quote.open?.[index] == null ? null : Number(quote.open[index])
+      const open =
+        quote.open?.[index] == null ? null : Number(quote.open[index])
       if (date && Number.isFinite(close) && close > 0) {
         rowsByDate.set(date, { date, close, open })
       }
@@ -115,7 +204,9 @@ const isLikelyDaily = (rows) => {
   for (let i = 1; i < rows.length; i += 1) {
     const prev = new Date(`${rows[i - 1].date}T00:00:00Z`)
     const curr = new Date(`${rows[i].date}T00:00:00Z`)
-    const gap = Math.round((curr.getTime() - prev.getTime()) / (24 * 60 * 60 * 1000))
+    const gap = Math.round(
+      (curr.getTime() - prev.getTime()) / (24 * 60 * 60 * 1000),
+    )
     if (gap > maxGap) maxGap = gap
   }
   return maxGap <= 10
@@ -137,11 +228,25 @@ const fetchUS = async (code) => {
   throw lastError ?? new Error(`No daily US data source available for ${code}`)
 }
 
-const fetchCN = async (code) => {
+const fetchCNFromEastmoney = async (code) => {
   const secid = CN_SECID[code]
-  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&klt=101&fqt=1&fields1=f1,f2,f3&fields2=f51,f52,f53`
-  const response = await fetch(url)
-  if (!response.ok) throw new Error(`Failed to fetch CN ${code}`)
+  const url = `https://push2his.eastmoney.com/api/qt/stock/kline/get?secid=${secid}&klt=101&fqt=0&fields1=f1,f2,f3&fields2=f51,f52,f53`
+  const response = await fetchWithRetry(url, {
+    label: `CN ${code}`,
+    retries: 2,
+    timeoutMs: 6000,
+    headers: {
+      'User-Agent': DEFAULT_USER_AGENT,
+      Accept: 'application/json,text/plain,*/*',
+      Referer: 'https://quote.eastmoney.com/',
+    },
+  })
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 200)
+    throw new Error(
+      `Failed to fetch CN ${code}: HTTP ${response.status}${detail ? ` ${detail}` : ''}`,
+    )
+  }
   const data = await response.json()
   const klines = data?.data?.klines ?? []
   return klines
@@ -155,6 +260,205 @@ const fetchCN = async (code) => {
     })
     .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
     .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+const toSinaSymbol = (code) => {
+  const secid = CN_SECID[code]
+  if (!secid) throw new Error(`Unsupported CN code ${code}`)
+  const [market] = secid.split('.')
+  return `${market === '0' ? 'sz' : 'sh'}${code}`
+}
+
+const toTencentSymbol = (code) => toSinaSymbol(code)
+
+const pickTencentQuoteNode = (payload, symbol) => {
+  const direct = payload?.data?.[symbol]
+  if (direct) return direct
+  const values = Object.values(payload?.data ?? {})
+  return values[0]
+}
+
+const fetchCNFromTencentKline = async (code) => {
+  const symbol = toTencentSymbol(code)
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/kline/kline?param=${symbol},day,,,1200`
+  const response = await fetchWithRetry(url, {
+    label: `CN ${code} from tencent kline`,
+    headers: {
+      'User-Agent': DEFAULT_USER_AGENT,
+      Accept: 'application/json,text/plain,*/*',
+      Referer: 'https://gu.qq.com/',
+    },
+  })
+
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 200)
+    throw new Error(
+      `Failed to fetch CN ${code} from tencent kline: HTTP ${response.status}${detail ? ` ${detail}` : ''}`,
+    )
+  }
+
+  const payload = await response.json()
+  const quoteNode = pickTencentQuoteNode(payload, symbol)
+  const rows = quoteNode?.day ?? []
+
+  return rows
+    .map((item) => ({
+      date: item[0],
+      open: item[1] == null ? null : Number(item[1]),
+      close: Number(item[2]),
+    }))
+    .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+const fetchCNFromTencentFq = async (code) => {
+  const symbol = toTencentSymbol(code)
+  const url = `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${symbol},day,,,1200,qfq`
+  const response = await fetchWithRetry(url, {
+    label: `CN ${code} from tencent fqkline`,
+    headers: {
+      'User-Agent': DEFAULT_USER_AGENT,
+      Accept: 'application/json,text/plain,*/*',
+      Referer: 'https://gu.qq.com/',
+    },
+  })
+
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 200)
+    throw new Error(
+      `Failed to fetch CN ${code} from tencent fqkline: HTTP ${response.status}${detail ? ` ${detail}` : ''}`,
+    )
+  }
+
+  const payload = await response.json()
+  const quoteNode = pickTencentQuoteNode(payload, symbol)
+  const rows = quoteNode?.day ?? []
+
+  return rows
+    .map((item) => ({
+      date: item[0],
+      open: item[1] == null ? null : Number(item[1]),
+      close: Number(item[2]),
+    }))
+    .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+const fetchCNFromSina = async (code) => {
+  const symbol = toSinaSymbol(code)
+  const url = `https://quotes.sina.cn/cn/api/openapi.php/CN_MarketDataService.getKLineData?symbol=${symbol}&scale=240&ma=no&datalen=1023`
+  const response = await fetchWithRetry(url, {
+    label: `CN ${code} from sina`,
+    headers: {
+      'User-Agent': DEFAULT_USER_AGENT,
+      Accept: 'application/json,text/plain,*/*',
+      Referer: 'https://finance.sina.com.cn/',
+    },
+  })
+
+  if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 200)
+    throw new Error(
+      `Failed to fetch CN ${code} from sina: HTTP ${response.status}${detail ? ` ${detail}` : ''}`,
+    )
+  }
+
+  const payload = await response.json()
+  const rows = payload?.result?.data ?? []
+  return rows
+    .map((row) => ({
+      date: row.day,
+      close: Number(row.close),
+      open: row.open == null ? null : Number(row.open),
+    }))
+    .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+const compareByDate = (baseRows, refRows) => {
+  const refByDate = new Map(refRows.map((row) => [row.date, row]))
+  let overlap = 0
+  let mismatches = 0
+  let maxRelativeDiff = 0
+
+  for (const row of baseRows) {
+    const ref = refByDate.get(row.date)
+    if (!ref) continue
+    overlap += 1
+    const relativeDiff =
+      Math.abs(row.close - ref.close) / Math.max(row.close, ref.close, 1e-9)
+    if (relativeDiff > 0.02) mismatches += 1
+    if (relativeDiff > maxRelativeDiff) maxRelativeDiff = relativeDiff
+  }
+
+  return {
+    overlap,
+    mismatches,
+    mismatchRate: overlap > 0 ? mismatches / overlap : 0,
+    maxRelativeDiff,
+  }
+}
+
+const verifyCNRows = (code, chosen, candidates) => {
+  const comparable = candidates.filter(
+    (candidate) => candidate.name !== chosen.name,
+  )
+  let strictComparisons = 0
+
+  for (const candidate of comparable) {
+    const stats = compareByDate(chosen.rows, candidate.rows)
+    if (stats.overlap < 60) {
+      continue
+    }
+
+    strictComparisons += 1
+    if (stats.mismatchRate > 0.05) {
+      throw new Error(
+        `CN ${code} data mismatch between ${chosen.name} and ${candidate.name} (overlap=${stats.overlap}, mismatchRate=${(stats.mismatchRate * 100).toFixed(2)}%)`,
+      )
+    }
+  }
+
+  if (strictComparisons === 0) {
+    console.warn(
+      `[warn] ${code}: no independent CN source with enough overlap for strict verification`,
+    )
+  }
+}
+
+const fetchCN = async (code) => {
+  const sources = [
+    { name: 'tencent-kline', fetch: fetchCNFromTencentKline },
+    { name: 'sina', fetch: fetchCNFromSina },
+    { name: 'eastmoney', fetch: fetchCNFromEastmoney },
+    { name: 'tencent-fqkline', fetch: fetchCNFromTencentFq },
+  ]
+
+  const candidates = []
+  let lastError
+  for (const source of sources) {
+    try {
+      const rows = await source.fetch(code)
+      if (rows.length > 0) {
+        candidates.push({ name: source.name, rows })
+      }
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  if (candidates.length === 0) {
+    throw (
+      lastError ?? new Error(`No daily CN data source available for ${code}`)
+    )
+  }
+
+  candidates.sort((a, b) => b.rows.length - a.rows.length)
+  const chosen = candidates[0]
+
+  verifyCNRows(code, chosen, candidates)
+  console.log(`[cn] ${code}: source=${chosen.name}, rows=${chosen.rows.length}`)
+  return chosen.rows
 }
 
 const loadExisting = async (file) => {
@@ -178,7 +482,9 @@ const mergeRows = ({ existingRows, fetchedRows, fixMode }) => {
     }
   }
 
-  const merged = [...existingByDate.values()].sort((a, b) => a.date.localeCompare(b.date))
+  const merged = [...existingByDate.values()].sort((a, b) =>
+    a.date.localeCompare(b.date),
+  )
 
   const existingDates = new Set(existingRows.map((row) => row.date))
   const mergedDates = new Set(merged.map((row) => row.date))
@@ -212,7 +518,25 @@ const updateOne = async ({ marketDir, market, code, fixMode }) => {
   const existingRows = await loadExisting(file)
   validateRows(existingRows)
 
-  const fetchedRows = market === 'us' ? await fetchUS(code) : await fetchCN(code)
+  let fetchedRows
+  try {
+    fetchedRows = market === 'us' ? await fetchUS(code) : await fetchCN(code)
+  } catch (error) {
+    if (existingRows.length > 0) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn(
+        `[warn] ${code}: fetch failed, keeping existing rows (${message})`,
+      )
+      return {
+        code,
+        before: existingRows.length,
+        after: existingRows.length,
+        skipped: true,
+      }
+    }
+    throw error
+  }
+
   validateRows(fetchedRows)
 
   const mergedRows = mergeRows({ existingRows, fetchedRows, fixMode })
@@ -231,7 +555,9 @@ const main = async () => {
     for (const code of codes) {
       const summary = await updateOne({ marketDir, market, code, fixMode })
       results.push(summary)
-      console.log(`${code}: ${summary.before} -> ${summary.after}`)
+      console.log(
+        `${code}: ${summary.before} -> ${summary.after}${summary.skipped ? ' (fetch skipped)' : ''}`,
+      )
     }
   }
 
