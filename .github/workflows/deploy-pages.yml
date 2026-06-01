@@ -22,7 +22,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: market-data
-          path: market-data-worktree
+          path: ./public/market-data
+
+      - name: remove git db
+        run: rm -rf ./public/market-data/.git
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -32,9 +35,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Sync market data to public directory
-        run: node scripts/sync-market-data.mjs ./market-data-worktree ./public/market-data
 
       - name: Test
         run: npm run test:run
