@@ -11,7 +11,7 @@ const importSchema = z.object({
   trades: z.array(z.object({ id: z.string(), profileId: z.string(), date: z.string(), instrumentCode: z.string(), side: z.enum(['buy', 'sell']), quantity: z.number(), price: z.number().nullable().optional(), note: z.string().optional() })),
   targetAllocations: z.array(z.object({ profileId: z.string(), instrumentCode: z.string(), targetWeight: z.number() })),
   strategyConfigs: z.array(z.object({ profileId: z.string(), expectedAnnualReturn: z.number(), maxDrawdown: z.number(), baseDailyInvestRate: z.number(), buyScaleMin: z.number(), buyScaleMax: z.number(), sellEnabled: z.boolean(), manualOverrideEnabled: z.boolean() })),
-  backtestConfigs: z.array(z.object({ profileId: z.string(), startDate: z.string(), endDate: z.string(), initialCash: z.number(), recurringCashflows: z.number(), useOpenPrice: z.boolean(), feeRate: z.number(), slippageRate: z.number() })),
+  backtestConfigs: z.array(z.object({ profileId: z.string(), startDate: z.string(), endDate: z.string(), initialCash: z.number(), recurringCashflows: z.number(), useOpenPrice: z.boolean(), feeRate: z.number(), slippageRate: z.number(), lotSizeRuleByInstrument: z.record(z.string(), z.enum(['fractional', 'integer', 'lot100'])).optional() })),
   uiPreference: z.object({ id: z.string(), defaultCurrency: z.enum(['USD', 'CNY']), fxUsdToCny: z.number(), showCashInAreaChart: z.boolean() }).nullable(),
 })
 

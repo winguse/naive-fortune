@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import dayjs from 'dayjs'
 import { Link, useParams } from 'react-router-dom'
 import { INSTRUMENT_BY_CODE } from '../config/instruments'
-import { db } from '../db/database'
 import { AssetAreaChart } from '../components/AssetAreaChart'
 import { AssetPieChart } from '../components/AssetPieChart'
 import { loadMarketDataBatch } from '../features/market-data/service'
@@ -14,13 +14,16 @@ import { getProfileBundle } from '../features/profiles/repository'
 import { createDefaultStrategyConfig } from '../config/defaults'
 import { createDrawdownAdjustedSuggestions } from '../features/strategy/drawdownDca'
 
+type HistoryRange = '3m' | '6m' | '1y' | '3y' | 'all'
+
 export const ProfileDashboardPage = () => {
   const { profileId = '' } = useParams()
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [bundle, setBundle] = useState<Awaited<ReturnType<typeof getProfileBundle>> | null>(null)
   const [marketData, setMarketData] = useState<Record<string, Array<{ date: string; close: number; open?: number | null }>>>({})
-  const [showCash, setShowCash] = useState(false)
+  const [showCashInPie, setShowCashInPie] = useState(true)
+  const [historyRange, setHistoryRange] = useState<HistoryRange>('1y')
 
   useEffect(() => {
     const run = async () => {
@@ -58,6 +61,37 @@ export const ProfileDashboardPage = () => {
     return buildWeightMap(snapshot, bundle.targetAllocations)
   }, [bundle, snapshot])
 
+  const elapsedTradingDays = useMemo(() => {
+    if (!bundle || !snapshot) return 1
+
+    // Find the most recent buy trade date
+    const lastBuyDate = bundle.trades
+      .filter((t) => t.side === 'buy')
+      .map((t) => t.date)
+      .sort()
+      .at(-1) ?? null
+
+    // Reference date: last buy date, or the earliest cashflow date if no buys yet
+    const referenceDate =
+      lastBuyDate ??
+      bundle.cashflows
+        .map((c) => c.date)
+        .sort()
+        .at(0) ??
+      null
+
+    if (!referenceDate) return 1
+
+    // All unique trading dates across all instruments, up to snapshot date
+    const allTradingDates = [
+      ...new Set(Object.values(marketData).flatMap((candles) => candles.map((c) => c.date))),
+    ]
+      .filter((d) => d > referenceDate && d <= snapshot.date)
+      .sort()
+
+    return Math.max(allTradingDates.length, 1)
+  }, [bundle, snapshot, marketData])
+
   const suggestions = useMemo(() => {
     if (!bundle || !snapshot) return []
     return createDrawdownAdjustedSuggestions({
@@ -65,7 +99,8 @@ export const ProfileDashboardPage = () => {
       strategy: bundle.strategy ?? createDefaultStrategyConfig(bundle.profile!.id),
       allocations: bundle.targetAllocations,
       marketData,
-      elapsedTradingDaysSinceLastBuy: 1,
+      elapsedTradingDaysSinceLastBuy: elapsedTradingDays,
+      lotSizeRuleByInstrument: bundle.backtest?.lotSizeRuleByInstrument ?? {},
     })
   }, [bundle, snapshot, marketData])
 
@@ -79,24 +114,39 @@ export const ProfileDashboardPage = () => {
     })
   }, [bundle, marketData])
 
+  const filteredHistoryPoints = useMemo(() => {
+    if (historyPoints.length === 0 || historyRange === 'all') return historyPoints
+
+    const endDate = dayjs(historyPoints[historyPoints.length - 1].date)
+    const startDate =
+      historyRange === '3m'
+        ? endDate.subtract(3, 'month')
+        : historyRange === '6m'
+          ? endDate.subtract(6, 'month')
+          : historyRange === '1y'
+            ? endDate.subtract(1, 'year')
+            : endDate.subtract(3, 'year')
+
+    return historyPoints.filter((point) => !dayjs(point.date).isBefore(startDate, 'day'))
+  }, [historyPoints, historyRange])
+
   if (loading) return <p>加载中...</p>
   if (error) return <p className="error">{error}</p>
   if (!bundle?.profile || !snapshot) return <p>未找到 profile</p>
-  const baseCurrency = bundle.profile.baseCurrency
 
   const pieData = [
     ...Object.entries(snapshot.marketValueByInstrument).map(([code, value]) => ({
       name: code,
       value,
     })),
-    ...(showCash ? [{ name: '现金', value: snapshot.cash }] : []),
+    ...(showCashInPie ? [{ name: '现金', value: snapshot.cash }] : []),
   ]
 
   const chartSeriesKeys = [
     ...new Set(
-      historyPoints.flatMap((point) => [
+      filteredHistoryPoints.flatMap((point) => [
         ...Object.keys(point.instrumentSeries),
-        ...(showCash ? ['cash'] : []),
+        'cash',
       ]),
     ),
   ]
@@ -131,6 +181,7 @@ export const ProfileDashboardPage = () => {
       </ul>
 
       <h3>操作建议（drawdown-adjusted DCA）</h3>
+      <p className="helper">累计未交易交易日：{elapsedTradingDays} 天，建议金额已合并</p>
       <ul>
         {suggestions.length === 0 ? <li>当前无买入建议</li> : null}
         {suggestions.map((item) => (
@@ -144,25 +195,29 @@ export const ProfileDashboardPage = () => {
       <label>
         <input
           type="checkbox"
-          checked={showCash}
-          onChange={async (event) => {
-            setShowCash(event.target.checked)
-            await db.uiPreferences.put({
-              id: 'default',
-              defaultCurrency: baseCurrency,
-              fxUsdToCny: 7.2,
-              showCashInAreaChart: event.target.checked,
-            })
-          }}
+          checked={showCashInPie}
+          onChange={(event) => setShowCashInPie(event.target.checked)}
         />
-        显示现金
+        饼图显示现金
       </label>
       <AssetPieChart data={pieData} />
 
       <h3>历史资产堆叠面积图</h3>
+      <div className="actions-row">
+        <label>
+          时间区间
+          <select value={historyRange} onChange={(event) => setHistoryRange(event.target.value as HistoryRange)}>
+            <option value="3m">近3个月</option>
+            <option value="6m">近6个月</option>
+            <option value="1y">近1年</option>
+            <option value="3y">近3年</option>
+            <option value="all">全部</option>
+          </select>
+        </label>
+      </div>
       <AssetAreaChart
         seriesKeys={chartSeriesKeys}
-        points={historyPoints.map((point) => ({
+        points={filteredHistoryPoints.map((point) => ({
           date: point.date,
           series: {
             ...point.instrumentSeries,

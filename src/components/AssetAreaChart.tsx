@@ -5,7 +5,15 @@ interface Point {
   series: Record<string, number>
 }
 
-export const AssetAreaChart = ({ points, seriesKeys }: { points: Point[]; seriesKeys: string[] }) => (
+export const AssetAreaChart = ({
+  points,
+  seriesKeys,
+  stacked = true,
+}: {
+  points: Point[]
+  seriesKeys: string[]
+  stacked?: boolean
+}) => (
   <ReactECharts
     style={{ height: 360 }}
     option={{
@@ -16,7 +24,7 @@ export const AssetAreaChart = ({ points, seriesKeys }: { points: Point[]; series
       series: seriesKeys.map((key) => ({
         name: key,
         type: 'line',
-        stack: 'total',
+        ...(stacked ? { stack: 'total' } : {}),
         areaStyle: {},
         showSymbol: false,
         data: points.map((point) => point.series[key] ?? 0),

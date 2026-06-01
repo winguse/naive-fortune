@@ -71,7 +71,10 @@ export interface BacktestConfig {
   useOpenPrice: boolean
   feeRate: number
   slippageRate: number
+  lotSizeRuleByInstrument?: Record<string, BacktestLotSizeRule>
 }
+
+export type BacktestLotSizeRule = 'fractional' | 'integer' | 'lot100'
 
 export interface UiPreference {
   id: string

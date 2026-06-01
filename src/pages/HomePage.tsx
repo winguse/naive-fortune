@@ -7,6 +7,8 @@ import type { Profile } from '../types/models'
 export const HomePage = () => {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [error, setError] = useState('')
+  const [importMode, setImportMode] = useState<'append' | 'overwrite'>('append')
+  const [pendingDeleteProfileId, setPendingDeleteProfileId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
@@ -33,13 +35,14 @@ export const HomePage = () => {
     const file = event.target.files?.[0]
     if (!file) return
     try {
-      const mode = window.confirm('确定覆盖现有数据吗？取消则使用追加导入。') ? 'overwrite' : 'append'
       const text = await file.text()
-      await importAllData(JSON.parse(text), mode)
+      await importAllData(JSON.parse(text), importMode)
       setError('')
       await refresh()
     } catch (importError) {
       setError(importError instanceof Error ? importError.message : '导入失败')
+    } finally {
+      event.target.value = ''
     }
   }
 
@@ -48,6 +51,13 @@ export const HomePage = () => {
       <div className="actions-row">
         <button onClick={() => navigate('/profiles/new')}>新建 Profile</button>
         <button onClick={handleExport}>导出数据</button>
+        <label>
+          导入模式
+          <select value={importMode} onChange={(event) => setImportMode(event.target.value as 'append' | 'overwrite')}>
+            <option value="append">追加导入</option>
+            <option value="overwrite">覆盖导入</option>
+          </select>
+        </label>
         <button onClick={() => fileInputRef.current?.click()}>导入数据</button>
         <input ref={fileInputRef} hidden type="file" accept="application/json" onChange={onImportFile} />
       </div>
@@ -62,16 +72,22 @@ export const HomePage = () => {
             <p>基准币种：{profile.baseCurrency}</p>
             <div className="actions-row">
               <Link to={`/profiles/${profile.id}`}>进入 Dashboard</Link>
-              <button
-                onClick={async () => {
-                  if (window.confirm('确定删除该 profile 吗？')) {
-                    await deleteProfile(profile.id)
-                    await refresh()
-                  }
-                }}
-              >
-                删除
-              </button>
+              {pendingDeleteProfileId === profile.id ? (
+                <>
+                  <button
+                    onClick={async () => {
+                      await deleteProfile(profile.id)
+                      setPendingDeleteProfileId(null)
+                      await refresh()
+                    }}
+                  >
+                    确认删除
+                  </button>
+                  <button onClick={() => setPendingDeleteProfileId(null)}>取消</button>
+                </>
+              ) : (
+                <button onClick={() => setPendingDeleteProfileId(profile.id)}>删除</button>
+              )}
             </div>
           </li>
         ))}

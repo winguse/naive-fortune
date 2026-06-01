@@ -1,5 +1,6 @@
-import type { MarketCandle, StrategyConfig, TargetAllocation } from '../../types/models'
+import type { MarketCandle, StrategyConfig, TargetAllocation, BacktestLotSizeRule } from '../../types/models'
 import type { PortfolioSnapshot } from '../portfolio/calc'
+import { applyLotSizeRule } from '../backtest/engine'
 
 export interface StrategySuggestion {
   instrumentCode: string
@@ -18,12 +19,14 @@ export const createDrawdownAdjustedSuggestions = ({
   allocations,
   marketData,
   elapsedTradingDaysSinceLastBuy = 1,
+  lotSizeRuleByInstrument = {},
 }: {
   snapshot: PortfolioSnapshot
   strategy: StrategyConfig
   allocations: TargetAllocation[]
   marketData: Record<string, MarketCandle[]>
   elapsedTradingDaysSinceLastBuy?: number
+  lotSizeRuleByInstrument?: Record<string, BacktestLotSizeRule>
 }): StrategySuggestion[] => {
   const positiveCash = Math.max(snapshot.cash, 0)
   if (positiveCash <= 0 || allocations.length === 0) return []
@@ -66,17 +69,31 @@ export const createDrawdownAdjustedSuggestions = ({
   return candidates.map((candidate) => {
     const budgetShare = totalGap > 0 ? candidate.gap / totalGap : 1 / candidates.length
     const estimatedAmount = Math.min(positiveCash, candidate.investBudget * budgetShare)
-    const quantity = estimatedAmount / candidate.currentPrice
+    const lotRule: BacktestLotSizeRule = lotSizeRuleByInstrument[candidate.allocation.instrumentCode] ?? 'fractional'
+    const rawQuantity = estimatedAmount / candidate.currentPrice
+    const quantity = applyLotSizeRule(rawQuantity, lotRule)
+
+    let lotNote = ''
+    if (lotRule !== 'fractional' && quantity === 0 && rawQuantity > 0) {
+      const minLot = lotRule === 'lot100' ? 100 : 1
+      const singleDayBudget = estimatedAmount / Math.max(elapsedTradingDaysSinceLastBuy, 1)
+      const amountNeeded = minLot * candidate.currentPrice
+      const extraDays = singleDayBudget > 0 ? Math.ceil((amountNeeded - estimatedAmount) / singleDayBudget) : 0
+      lotNote = `，还需约 ${extraDays} 个交易日积累预算才能下单`
+    } else if (lotRule !== 'fractional' && quantity > 0) {
+      const remainderAmount = (rawQuantity - quantity) * candidate.currentPrice
+      lotNote = `，余额约 ${remainderAmount.toFixed(2)} 继续积累`
+    }
 
     return {
       instrumentCode: candidate.allocation.instrumentCode,
       action: quantity > 0 ? 'buy' : 'hold',
       quantity,
       estimatedPrice: candidate.currentPrice,
-      estimatedAmount,
+      estimatedAmount: quantity * candidate.currentPrice,
       rationale: `drawdown=${(candidate.drawdown * 100).toFixed(2)}%, ddRatio=${candidate.ddRatio.toFixed(2)}, currentWeight=${(
         candidate.currentWeight * 100
-      ).toFixed(2)}%, targetWeight=${(candidate.allocation.targetWeight * 100).toFixed(2)}%, multiplier=${candidate.multiplier.toFixed(2)}`,
+      ).toFixed(2)}%, targetWeight=${(candidate.allocation.targetWeight * 100).toFixed(2)}%, multiplier=${candidate.multiplier.toFixed(2)}${lotNote}`,
     }
   })
 }

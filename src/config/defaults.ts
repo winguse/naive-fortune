@@ -28,4 +28,5 @@ export const createDefaultBacktestConfig = (profileId: string): BacktestConfig =
   useOpenPrice: false,
   feeRate: 0.0005,
   slippageRate: 0.0005,
+  lotSizeRuleByInstrument: {},
 })

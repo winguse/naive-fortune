@@ -18,6 +18,13 @@ export interface PortfolioSnapshot {
 
 export const getLatestPrice = (candles: MarketCandle[]) => candles[candles.length - 1]?.close ?? 0
 
+const getPriceAtOrBefore = (candles: MarketCandle[], date: string) => {
+  for (let index = candles.length - 1; index >= 0; index -= 1) {
+    if (candles[index].date <= date) return candles[index].close
+  }
+  return 0
+}
+
 export const buildPortfolioSnapshot = ({
   cashflows,
   trades,
@@ -94,7 +101,14 @@ export const buildHistoricalAssetSeries = ({
   initialHoldings: InitialHolding[]
   marketData: Record<string, MarketCandle[]>
 }) => {
-  const timeline = [...new Set(Object.values(marketData).flatMap((rows) => rows.map((row) => row.date)))].sort()
+  const timeline = [
+    ...new Set([
+      ...Object.values(marketData).flatMap((rows) => rows.map((row) => row.date)),
+      ...cashflows.map((row) => row.date),
+      ...trades.map((row) => row.date),
+      ...initialHoldings.map((row) => row.acquiredAt),
+    ]),
+  ].sort()
   const holdings: Record<string, number> = {}
   let cash = 0
 
@@ -104,26 +118,30 @@ export const buildHistoricalAssetSeries = ({
 
   const orderedCashflows = [...cashflows].sort((a, b) => a.date.localeCompare(b.date))
   const orderedTrades = [...trades].sort((a, b) => a.date.localeCompare(b.date))
+  let cashflowCursor = 0
+  let tradeCursor = 0
 
   return timeline.map((date) => {
-    for (const row of orderedCashflows.filter((item) => item.date === date)) {
-      cash += row.amount
+    while (cashflowCursor < orderedCashflows.length && orderedCashflows[cashflowCursor].date <= date) {
+      cash += orderedCashflows[cashflowCursor].amount
+      cashflowCursor += 1
     }
 
-    for (const trade of orderedTrades.filter((item) => item.date === date)) {
+    while (tradeCursor < orderedTrades.length && orderedTrades[tradeCursor].date <= date) {
+      const trade = orderedTrades[tradeCursor]
       const marketPrice =
-        marketData[trade.instrumentCode]?.find((row) => row.date === date)?.close ??
+        getPriceAtOrBefore(marketData[trade.instrumentCode] ?? [], date) ||
         getLatestPrice(marketData[trade.instrumentCode] ?? [])
       const price = trade.price ?? marketPrice
       const signedQty = trade.side === 'buy' ? trade.quantity : -trade.quantity
       holdings[trade.instrumentCode] = (holdings[trade.instrumentCode] ?? 0) + signedQty
       cash += (trade.side === 'buy' ? -1 : 1) * trade.quantity * price
+      tradeCursor += 1
     }
 
     const instrumentSeries: Record<string, number> = {}
     for (const [code, quantity] of Object.entries(holdings)) {
-      const price =
-        marketData[code]?.find((row) => row.date === date)?.close ?? getLatestPrice(marketData[code] ?? [])
+      const price = getPriceAtOrBefore(marketData[code] ?? [], date) || getLatestPrice(marketData[code] ?? [])
       instrumentSeries[code] = quantity * price
     }
 

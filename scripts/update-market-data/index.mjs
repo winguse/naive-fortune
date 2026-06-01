@@ -141,6 +141,9 @@ const fetchUSFromStooq = async (code) => {
   })
   if (!response.ok) throw new Error(`Failed to fetch US ${code} from stooq`)
   const text = await response.text()
+  if (text.includes('Get your apikey')) {
+    throw new Error(`Stooq now requires an API key for ${code}`)
+  }
   const lines = text.trim().split(/\r?\n/).slice(1)
   return lines
     .filter(Boolean)
@@ -151,25 +154,63 @@ const fetchUSFromStooq = async (code) => {
     .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
 }
 
+const getYahooCrumb = async () => {
+  const cookieResp = await fetchWithRetry('https://fc.yahoo.com', {
+    label: 'yahoo cookie',
+    retries: 2,
+    timeoutMs: 8000,
+  })
+  const rawCookie = cookieResp.headers.get('set-cookie') ?? ''
+  const cookie = rawCookie
+    .split(',')
+    .map((s) => s.trim().split(';')[0])
+    .filter((s) => /^[A-Za-z0-9_]+=/.test(s))
+    .join('; ')
+
+  const crumbResp = await fetchWithRetry(
+    'https://query1.finance.yahoo.com/v1/test/getcrumb',
+    {
+      label: 'yahoo crumb',
+      retries: 2,
+      timeoutMs: 8000,
+      headers: { Cookie: cookie },
+    },
+  )
+
+  if (!crumbResp.ok) {
+    throw new Error(`Failed to get Yahoo crumb: HTTP ${crumbResp.status}`)
+  }
+
+  const crumb = await crumbResp.text()
+  if (!crumb || crumb.includes('Requests') || crumb.length > 20) {
+    throw new Error(`Unexpected Yahoo crumb response: ${crumb.slice(0, 50)}`)
+  }
+
+  return { crumb, cookie }
+}
+
 const fetchUSFromYahoo = async (code) => {
-  const start = new Date('2010-01-01T00:00:00Z')
+  const { crumb, cookie } = await getYahooCrumb()
+
+  const start = new Date('1988-01-01T00:00:00Z')
   const end = new Date()
   const rowsByDate = new Map()
 
   for (
     let current = new Date(start);
     current <= end;
-    current.setUTCFullYear(current.getUTCFullYear() + 2)
+    current.setUTCFullYear(current.getUTCFullYear() + 3)
   ) {
     const period1 = Math.floor(current.getTime() / 1000)
     const periodEnd = new Date(current)
-    periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 2)
+    periodEnd.setUTCFullYear(periodEnd.getUTCFullYear() + 3)
     const period2 = Math.floor(
       Math.min(periodEnd.getTime(), end.getTime()) / 1000,
     )
-    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${code}?period1=${period1}&period2=${period2}&interval=1d&includePrePost=false&events=history`
+    const url = `https://query1.finance.yahoo.com/v8/finance/chart/${code}?period1=${period1}&period2=${period2}&interval=1d&includePrePost=false&events=history&crumb=${encodeURIComponent(crumb)}`
     const response = await fetchWithRetry(url, {
       label: `US ${code} from yahoo`,
+      headers: { Cookie: cookie },
     })
     if (!response.ok) {
       const payload = await response.json().catch(() => null)
@@ -177,7 +218,9 @@ const fetchUSFromYahoo = async (code) => {
       if (response.status === 400 && message.includes("Data doesn't exist")) {
         continue
       }
-      throw new Error(`Failed to fetch US ${code} from yahoo`)
+      throw new Error(
+        `Failed to fetch US ${code} from yahoo: HTTP ${response.status}`,
+      )
     }
     const payload = await response.json()
     const result = payload?.chart?.result?.[0]
@@ -260,6 +303,88 @@ const fetchCNFromEastmoney = async (code) => {
     })
     .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
     .sort((a, b) => a.date.localeCompare(b.date))
+}
+
+const decodeEastmoneyContent = (content) =>
+  content
+    .replace(/\\\//g, '/')
+    .replace(/\\"/g, '"')
+    .replace(/\\r\\n/g, '')
+
+const parseFundHistoryRows = (html) => {
+  const rows = []
+  const trRegex = /<tr>([\s\S]*?)<\/tr>/g
+
+  for (const match of html.matchAll(trRegex)) {
+    const tr = match[1]
+    const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((cell) =>
+      cell[1]
+        .replace(/<[^>]+>/g, '')
+        .replace(/&nbsp;/g, ' ')
+        .trim(),
+    )
+    if (cells.length < 2) continue
+
+    const date = cells[0].replace(/\//g, '-')
+    const close = Number(cells[1])
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue
+    if (!Number.isFinite(close) || close <= 0) continue
+
+    rows.push({
+      date,
+      close,
+      open: null,
+    })
+  }
+
+  return rows
+}
+
+const fetchCNFromEastmoneyFundHistory = async (code) => {
+  const pageSize = 49
+  const rowsByDate = new Map()
+  let totalPages = 1
+
+  for (let page = 1; page <= totalPages; page += 1) {
+    const url = `https://fundf10.eastmoney.com/F10DataApi.aspx?type=lsjz&code=${code}&page=${page}&per=${pageSize}&sdate=&edate=`
+    const response = await fetchWithRetry(url, {
+      label: `CN ${code} from eastmoney fund history page ${page}`,
+      retries: 2,
+      timeoutMs: 8000,
+      headers: {
+        Accept:
+          'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        Referer: `https://fundf10.eastmoney.com/jjjz_${code}.html`,
+      },
+    })
+
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch CN ${code} fund history page ${page}: HTTP ${response.status}`,
+      )
+    }
+
+    const payload = await response.text()
+    const contentMatch = payload.match(/content:\"([\s\S]*?)\",records:/)
+    if (!contentMatch) break
+
+    const html = decodeEastmoneyContent(contentMatch[1])
+    const rows = parseFundHistoryRows(html)
+    for (const row of rows) {
+      rowsByDate.set(row.date, row)
+    }
+
+    const pagesMatch = payload.match(/pages:(\d+)/)
+    if (pagesMatch) {
+      totalPages = Number(pagesMatch[1])
+    }
+
+    if (rows.length === 0) {
+      break
+    }
+  }
+
+  return [...rowsByDate.values()].sort((a, b) => a.date.localeCompare(b.date))
 }
 
 const toSinaSymbol = (code) => {
@@ -428,6 +553,7 @@ const verifyCNRows = (code, chosen, candidates) => {
 
 const fetchCN = async (code) => {
   const sources = [
+    { name: 'eastmoney-fund-history', fetch: fetchCNFromEastmoneyFundHistory },
     { name: 'tencent-kline', fetch: fetchCNFromTencentKline },
     { name: 'sina', fetch: fetchCNFromSina },
     { name: 'eastmoney', fetch: fetchCNFromEastmoney },
