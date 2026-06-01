@@ -6,6 +6,7 @@ import { useForm, useWatch } from 'react-hook-form'
 import { z } from 'zod'
 import { instrumentsByMarket } from '../config/instruments'
 import { createProfileWithSeed } from '../features/profiles/repository'
+import { isZh } from '../i18n/language'
 
 const formSchema = z.object({
   name: z.string().min(1, '请输入名称'),
@@ -57,6 +58,69 @@ export const ProfileInitPage = () => {
     [instrumentList],
   )
   const defaultInstrumentCode = instrumentList[0]?.code ?? ''
+  const text = isZh
+    ? {
+        noInstrument: '当前市场没有可用标的',
+        holdingPrefix: '初始持仓第',
+        allocationPrefix: '目标比例第',
+        instrumentNotInList: '行标的不在当前市场可选列表',
+        holdingQuantityInvalid: '行数量必须大于 0',
+        dateInvalid: '行买入日期格式应为 YYYY-MM-DD',
+        duplicatedHolding: '初始持仓存在重复标的：',
+        needOneAllocation: '至少配置一个目标标的',
+        allocationWeightInvalid: '行比例必须大于 0',
+        duplicatedAllocation: '目标比例存在重复标的：',
+        allocationSumInvalid: '目标比例总和必须为 1（100%）',
+        createFail: '创建失败',
+        title: '初始化组合',
+        instrumentHint: '可选标的',
+        name: '名称',
+        market: '市场',
+        cn: '中国市场',
+        us: '美国市场',
+        initialCash: '初始现金',
+        initialCashDate: '初始现金日期',
+        holdingsTitle: '初始持仓（标的,数量,买入日期）',
+        noHoldings: '无初始持仓，可直接提交或添加行',
+        quantity: '数量',
+        delete: '删除',
+        addHolding: '添加初始持仓',
+        allocationsTitle: '目标比例（标的,比例；比例总和=1）',
+        weight: '比例',
+        addAllocation: '添加目标比例',
+        submit: '保存并进入仪表盘',
+      }
+    : {
+        noInstrument: 'No instrument available for this market',
+        holdingPrefix: 'Initial holding row ',
+        allocationPrefix: 'Target allocation row ',
+        instrumentNotInList: ' instrument is not available in current market',
+        holdingQuantityInvalid: ' quantity must be greater than 0',
+        dateInvalid: ' acquired date must be YYYY-MM-DD',
+        duplicatedHolding: 'Duplicated instrument in initial holdings: ',
+        needOneAllocation: 'At least one target allocation is required',
+        allocationWeightInvalid: ' weight must be greater than 0',
+        duplicatedAllocation: 'Duplicated instrument in target allocations: ',
+        allocationSumInvalid: 'Target allocation sum must be 1 (100%)',
+        createFail: 'Create failed',
+        title: 'Initialize Profile',
+        instrumentHint: 'Available instruments',
+        name: 'Name',
+        market: 'Market',
+        cn: 'China',
+        us: 'United States',
+        initialCash: 'Initial Cash',
+        initialCashDate: 'Initial Cash Date',
+        holdingsTitle: 'Initial Holdings (instrument, quantity, acquired date)',
+        noHoldings: 'No initial holdings. Submit directly or add rows.',
+        quantity: 'Quantity',
+        delete: 'Delete',
+        addHolding: 'Add Initial Holding',
+        allocationsTitle: 'Target Allocation (instrument, weight; sum=1)',
+        weight: 'Weight',
+        addAllocation: 'Add Target Allocation',
+        submit: 'Save and Enter Dashboard',
+      }
 
   useEffect(() => {
     setHoldingsDrafts((current) =>
@@ -83,7 +147,7 @@ export const ProfileInitPage = () => {
 
   const onSubmit = handleSubmit(async (value) => {
     if (!defaultInstrumentCode) {
-      setError('当前市场没有可用标的')
+      setError(text.noInstrument)
       return
     }
 
@@ -96,15 +160,15 @@ export const ProfileInitPage = () => {
 
     for (const row of parsedHoldings) {
       if (!instrumentCodeSet.has(row.instrumentCode)) {
-        setError(`初始持仓第 ${row.index + 1} 行标的不在当前市场可选列表`)
+        setError(`${text.holdingPrefix}${row.index + 1}${text.instrumentNotInList}`)
         return
       }
       if (!Number.isFinite(row.quantity) || row.quantity <= 0) {
-        setError(`初始持仓第 ${row.index + 1} 行数量必须大于 0`)
+        setError(`${text.holdingPrefix}${row.index + 1}${text.holdingQuantityInvalid}`)
         return
       }
       if (!isValidDate(row.acquiredAt)) {
-        setError(`初始持仓第 ${row.index + 1} 行买入日期格式应为 YYYY-MM-DD`)
+        setError(`${text.holdingPrefix}${row.index + 1}${text.dateInvalid}`)
         return
       }
     }
@@ -113,7 +177,7 @@ export const ProfileInitPage = () => {
       .map((row) => row.instrumentCode)
       .find((code, index, list) => list.indexOf(code) !== index)
     if (duplicatedHoldingCode) {
-      setError(`初始持仓存在重复标的：${duplicatedHoldingCode}`)
+      setError(`${text.duplicatedHolding}${duplicatedHoldingCode}`)
       return
     }
 
@@ -124,17 +188,17 @@ export const ProfileInitPage = () => {
     }))
 
     if (parsedAllocations.length === 0) {
-      setError('至少配置一个目标标的')
+      setError(text.needOneAllocation)
       return
     }
 
     for (const row of parsedAllocations) {
       if (!instrumentCodeSet.has(row.instrumentCode)) {
-        setError(`目标比例第 ${row.index + 1} 行标的不在当前市场可选列表`)
+        setError(`${text.allocationPrefix}${row.index + 1}${text.instrumentNotInList}`)
         return
       }
       if (!Number.isFinite(row.targetWeight) || row.targetWeight <= 0) {
-        setError(`目标比例第 ${row.index + 1} 行比例必须大于 0`)
+        setError(`${text.allocationPrefix}${row.index + 1}${text.allocationWeightInvalid}`)
         return
       }
     }
@@ -143,7 +207,7 @@ export const ProfileInitPage = () => {
       .map((row) => row.instrumentCode)
       .find((code, index, list) => list.indexOf(code) !== index)
     if (duplicatedAllocationCode) {
-      setError(`目标比例存在重复标的：${duplicatedAllocationCode}`)
+      setError(`${text.duplicatedAllocation}${duplicatedAllocationCode}`)
       return
     }
 
@@ -152,7 +216,7 @@ export const ProfileInitPage = () => {
       0,
     )
     if (!isNearlyEqual(allocationSum, 1)) {
-      setError('目标比例总和必须为 1（100%）')
+      setError(text.allocationSumInvalid)
       return
     }
 
@@ -180,30 +244,30 @@ export const ProfileInitPage = () => {
       })
       navigate(`/profiles/${profile.id}`)
     } catch (createError) {
-      setError(createError instanceof Error ? createError.message : '创建失败')
+      setError(createError instanceof Error ? createError.message : text.createFail)
     }
   })
 
   return (
     <section className="form-page">
-      <h2>初始化 Profile</h2>
+      <h2>{text.title}</h2>
       <p className="helper">
-        可选标的：{instrumentList.map((row) => row.code).join(' / ')}
+        {text.instrumentHint}: {instrumentList.map((row) => row.code).join(' / ')}
       </p>
       <form onSubmit={onSubmit} className="form-grid">
         <label>
-          名称
+          {text.name}
           <input {...register('name')} />
         </label>
         <label>
-          市场
+          {text.market}
           <select {...register('market')}>
-            <option value="cn">中国市场</option>
-            <option value="us">美国市场</option>
+            <option value="cn">{text.cn}</option>
+            <option value="us">{text.us}</option>
           </select>
         </label>
         <label>
-          初始现金
+          {text.initialCash}
           <input
             type="number"
             step="0.01"
@@ -211,13 +275,13 @@ export const ProfileInitPage = () => {
           />
         </label>
         <label>
-          初始现金日期
+          {text.initialCashDate}
           <input type="date" {...register('initialCashDate')} />
         </label>
         <div className="detail-input-group">
-          <h3>初始持仓（标的,数量,买入日期）</h3>
+          <h3>{text.holdingsTitle}</h3>
           {holdingsDrafts.length === 0 && (
-            <p className="helper">无初始持仓，可直接提交或添加行</p>
+            <p className="helper">{text.noHoldings}</p>
           )}
           {holdingsDrafts.map((row, index) => (
             <div className="detail-input-row" key={`holding-${index}`}>
@@ -242,7 +306,7 @@ export const ProfileInitPage = () => {
                 type="number"
                 step="0.0001"
                 min="0"
-                placeholder="数量"
+                placeholder={text.quantity}
                 value={row.quantity}
                 onChange={(event) => {
                   const next = [...holdingsDrafts]
@@ -270,7 +334,7 @@ export const ProfileInitPage = () => {
                   )
                 }
               >
-                删除
+                {text.delete}
               </button>
             </div>
           ))}
@@ -287,12 +351,12 @@ export const ProfileInitPage = () => {
               ])
             }
           >
-            添加初始持仓
+            {text.addHolding}
           </button>
         </div>
 
         <div className="detail-input-group">
-          <h3>目标比例（标的,比例；比例总和=1）</h3>
+          <h3>{text.allocationsTitle}</h3>
           {allocationDrafts.map((row, index) => (
             <div
               className="detail-input-row detail-input-row--allocation"
@@ -319,7 +383,7 @@ export const ProfileInitPage = () => {
                 type="number"
                 step="0.0001"
                 min="0"
-                placeholder="比例"
+                placeholder={text.weight}
                 value={row.targetWeight}
                 onChange={(event) => {
                   const next = [...allocationDrafts]
@@ -339,7 +403,7 @@ export const ProfileInitPage = () => {
                 }
                 disabled={allocationDrafts.length <= 1}
               >
-                删除
+                {text.delete}
               </button>
             </div>
           ))}
@@ -355,14 +419,14 @@ export const ProfileInitPage = () => {
               ])
             }
           >
-            添加目标比例
+            {text.addAllocation}
           </button>
         </div>
         {error && <p className="error">{error}</p>}
         {formState.errors.name && (
           <p className="error">{formState.errors.name.message}</p>
         )}
-        <button type="submit">保存并进入 Dashboard</button>
+        <button type="submit">{text.submit}</button>
       </form>
     </section>
   )

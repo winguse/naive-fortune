@@ -15,11 +15,11 @@ jobs:
       - name: Checkout default branch
         uses: actions/checkout@v4
 
-      - name: Checkout market-data branch
+      - name: Checkout gh-pages branch
         uses: actions/checkout@v4
         with:
-          ref: market-data
-          path: market-data-worktree
+          ref: gh-pages
+          path: gh-pages-worktree
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -27,11 +27,11 @@ jobs:
           node-version: 22
 
       - name: Update and validate market data
-        run: node scripts/update-market-data/index.mjs --market-dir=market-data-worktree
+        run: node scripts/update-market-data/index.mjs --market-dir=gh-pages-worktree/market-data
 
       - name: Force push market-data
         run: |
-          cd market-data-worktree
+          cd gh-pages-worktree
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add -A
@@ -39,5 +39,5 @@ jobs:
             echo "No market data changes"
             exit 0
           fi
-          git commit -m "chore: update market data"
-          git push origin HEAD:market-data --force
+          git commit -m "chore: update gh-pages"
+          git push origin HEAD:gh-pages --force

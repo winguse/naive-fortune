@@ -21,11 +21,11 @@ jobs:
       - name: Checkout market-data branch
         uses: actions/checkout@v4
         with:
-          ref: market-data
-          path: ./public/market-data
+          ref: gh-pages
+          path: ./previous
 
-      - name: remove git db
-        run: rm -rf ./public/market-data/.git
+      - name: mv previous to public/market-data
+        run: mv ./previous/market-data ./public/market-data && rm -rf ./previous
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

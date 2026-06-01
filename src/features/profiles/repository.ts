@@ -1,6 +1,11 @@
 import dayjs from 'dayjs'
 import { db } from '../../db/database'
-import { createDefaultBacktestConfig, createDefaultStrategyConfig, DEFAULT_UI_PREFERENCE } from '../../config/defaults'
+import {
+  createDefaultBacktestConfig,
+  createDefaultStrategyConfig,
+  DEFAULT_UI_PREFERENCE,
+  getDefaultLotSizeRuleForMarket,
+} from '../../config/defaults'
 import { createId } from '../../lib/id'
 import type { Currency, InitialHolding, Market, Profile, TargetAllocation } from '../../types/models'
 
@@ -89,12 +94,26 @@ export const createProfileWithSeed = async (input: ProfileSeedInput) => {
           })),
         )
       }
-      await db.strategyConfigs.put(createDefaultStrategyConfig(profile.id))
-      await db.backtestConfigs.put(createDefaultBacktestConfig(profile.id))
       const pref = await db.uiPreferences.get(DEFAULT_UI_PREFERENCE.id)
-      if (!pref) {
-        await db.uiPreferences.put(DEFAULT_UI_PREFERENCE)
-      }
+      const resolvedPref = pref ?? DEFAULT_UI_PREFERENCE
+      if (!pref) await db.uiPreferences.put(DEFAULT_UI_PREFERENCE)
+
+      await db.strategyConfigs.put(
+        createDefaultStrategyConfig(profile.id, {
+          expectedAnnualReturn: resolvedPref.globalExpectedAnnualReturn,
+          maxDrawdown: resolvedPref.globalMaxDrawdown,
+        }),
+      )
+      await db.backtestConfigs.put(
+        createDefaultBacktestConfig(profile.id, {
+          lotSizeRuleByInstrument: Object.fromEntries(
+            input.allocations.map((row) => [
+              row.instrumentCode,
+              resolvedPref.defaultLotSizeRuleByMarket[input.market] ?? getDefaultLotSizeRuleForMarket(input.market),
+            ]),
+          ),
+        }),
+      )
     },
   )
 

@@ -22,7 +22,9 @@ describe('HomePage', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('暂无 Profile，请先创建。')).toBeTruthy()
+      const zhText = screen.queryByText('暂无组合，请先创建。')
+      const enText = screen.queryByText('No profiles yet. Create one to get started.')
+      expect(Boolean(zhText || enText)).toBe(true)
     })
   })
 })

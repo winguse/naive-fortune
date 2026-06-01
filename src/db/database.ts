@@ -27,7 +27,8 @@ class NaiveFortuneDB extends Dexie {
       initialHoldings: 'id, profileId, instrumentCode, acquiredAt',
       cashflows: 'id, profileId, date',
       trades: 'id, profileId, date, instrumentCode',
-      targetAllocations: '[profileId+instrumentCode], profileId, instrumentCode',
+      targetAllocations:
+        '[profileId+instrumentCode], profileId, instrumentCode',
       strategyConfigs: 'profileId',
       backtestConfigs: 'profileId',
       uiPreferences: 'id',

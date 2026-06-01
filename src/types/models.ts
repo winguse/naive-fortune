@@ -1,5 +1,6 @@
 export type Market = 'us' | 'cn'
 export type Currency = 'USD' | 'CNY'
+export type Language = 'zh-CN' | 'en-US'
 
 export interface Instrument {
   code: string
@@ -56,21 +57,34 @@ export interface StrategyConfig {
   expectedAnnualReturn: number
   maxDrawdown: number
   baseDailyInvestRate: number
+  baseDailyInvestRateMode?: 'fixed_1_252' | 'naive' | 'kelly_variant'
+  acceptableMaxDrawdown?: number
+  volatilityLookbackDays?: number
+  kellyFraction?: number
+  feeRate?: number
+  slippageRate?: number
+  lotSizeRuleByInstrument?: Record<string, BacktestLotSizeRule>
   buyScaleMin: number
   buyScaleMax: number
   sellEnabled: boolean
   manualOverrideEnabled: boolean
+  instrumentOverrides?: Record<
+    string,
+    {
+      expectedAnnualReturn?: number
+      maxDrawdown?: number
+      feeRate?: number
+      slippageRate?: number
+      lotSizeRule?: BacktestLotSizeRule
+    }
+  >
 }
 
 export interface BacktestConfig {
   profileId: string
   startDate: string
   endDate: string
-  initialCash: number
-  recurringCashflows: number
   useOpenPrice: boolean
-  feeRate: number
-  slippageRate: number
   lotSizeRuleByInstrument?: Record<string, BacktestLotSizeRule>
 }
 
@@ -81,6 +95,10 @@ export interface UiPreference {
   defaultCurrency: Currency
   fxUsdToCny: number
   showCashInAreaChart: boolean
+  language: Language | 'auto'
+  globalExpectedAnnualReturn: number
+  globalMaxDrawdown: number
+  defaultLotSizeRuleByMarket: Record<Market, BacktestLotSizeRule>
 }
 
 export interface MarketCandle {
