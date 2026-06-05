@@ -1,6 +1,10 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
+async function sleep(t) {
+  return new Promise(resolve => setTimeout(resolve, t))
+}
+
 const MARKET_DATA_LAYOUT = {
   us: ['FXAIX', 'QQQM'],
   cn: ['159399', '159222', '563020', '510050', '510300'],
@@ -158,7 +162,11 @@ const fetchUSFromStooq = async (code) => {
     .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
 }
 
+let lastAVTs = 0
 const fetchUSFromAlphaVantage = async (code) => {
+  const msSince = Date.now() - lastAVTs
+  if (msSince < 1500) await sleep(1500 - msSince)
+  lastAVTs = Date.now()
   const alphaVantageApiKey = process.env.ALPHA_VANTAGE_API_KEY?.trim()
   if (!alphaVantageApiKey) {
     throw new Error(
