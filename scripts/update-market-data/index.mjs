@@ -166,7 +166,7 @@ const fetchUSFromAlphaVantage = async (code) => {
     )
   }
 
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${encodeURIComponent(
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=${encodeURIComponent(
     code.toUpperCase(),
   )}&outputsize=compact&apikey=${encodeURIComponent(alphaVantageApiKey)}`
   const response = await fetchWithRetry(url, {
