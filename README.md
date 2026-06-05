@@ -32,7 +32,7 @@ npm run build
 
 支持标的：
 
-- US: FXAIX, QQQM（Stooq）
+- US: FXAIX, QQQM（Yahoo / Alpha Vantage / Stooq）
 - CN: 159399, 159222, 563020, 510050, 510300（Eastmoney）
 
 统一 CSV 格式：
@@ -48,9 +48,10 @@ date,close,open
 npm run market-data:update
 ```
 
-如果需要使用 Stooq 数据源，请先设置环境变量 `STOOQ_API_KEY`：
+如果需要使用 Alpha Vantage / Stooq 数据源，请先设置环境变量：
 
 ```bash
+export ALPHA_VANTAGE_API_KEY=XXXXXXXXXXXXXXXX
 export STOOQ_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 npm run market-data:update
 ```

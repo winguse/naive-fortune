@@ -158,6 +158,75 @@ const fetchUSFromStooq = async (code) => {
     .filter((row) => row.date && Number.isFinite(row.close) && row.close > 0)
 }
 
+const fetchUSFromAlphaVantage = async (code) => {
+  const alphaVantageApiKey = process.env.ALPHA_VANTAGE_API_KEY?.trim()
+  if (!alphaVantageApiKey) {
+    throw new Error(
+      'Missing ALPHA_VANTAGE_API_KEY for Alpha Vantage request',
+    )
+  }
+
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${encodeURIComponent(
+    code.toUpperCase(),
+  )}&outputsize=full&apikey=${encodeURIComponent(alphaVantageApiKey)}`
+  const response = await fetchWithRetry(url, {
+    label: `US ${code} from alpha vantage`,
+    retries: 3,
+    timeoutMs: 10000,
+    headers: { Accept: 'application/json,text/plain,*/*' },
+  })
+
+  const payload = await response.json().catch(() => null)
+  if (!response.ok) {
+    const detail = (
+      payload?.['Error Message'] ??
+      payload?.Note ??
+      payload?.Information ??
+      ''
+    )
+      .toString()
+      .slice(0, 200)
+    throw new Error(
+      `Failed to fetch US ${code} from alpha vantage: HTTP ${response.status}${detail ? ` ${detail}` : ''}`,
+    )
+  }
+
+  const explicitError = payload?.['Error Message']
+  if (typeof explicitError === 'string' && explicitError.trim()) {
+    throw new Error(`Alpha Vantage error for ${code}: ${explicitError}`)
+  }
+
+  const limitMessage = payload?.Note ?? payload?.Information
+  if (typeof limitMessage === 'string' && limitMessage.trim()) {
+    throw new Error(
+      `Alpha Vantage rate limit/info for ${code}: ${limitMessage.slice(0, 200)}`,
+    )
+  }
+
+  const series = payload?.['Time Series (Daily)']
+  if (!series || typeof series !== 'object') {
+    throw new Error(`Unexpected Alpha Vantage payload for ${code}`)
+  }
+
+  return Object.entries(series)
+    .map(([date, point]) => {
+      const openValue = point?.['1. open']
+      return {
+        date,
+        close: Number(point?.['4. close']),
+        open: openValue == null || openValue === '' ? null : Number(openValue),
+      }
+    })
+    .filter(
+      (row) =>
+        row.date &&
+        Number.isFinite(row.close) &&
+        row.close > 0 &&
+        (row.open == null || Number.isFinite(row.open)),
+    )
+    .sort((a, b) => a.date.localeCompare(b.date))
+}
+
 const getYahooCrumb = async () => {
   const cookieResp = await fetchWithRetry('https://fc.yahoo.com', {
     label: 'yahoo cookie',
@@ -260,7 +329,7 @@ const isLikelyDaily = (rows) => {
 }
 
 const fetchUS = async (code) => {
-  const sources = [fetchUSFromYahoo, fetchUSFromStooq]
+  const sources = [fetchUSFromYahoo, fetchUSFromAlphaVantage, fetchUSFromStooq]
   let lastError
   for (const source of sources) {
     try {
