@@ -28,6 +28,7 @@ jobs:
 
       - name: Update and validate market data
         env:
+          ALPHA_VANTAGE_API_KEY: ${{ secrets.ALPHA_VANTAGE_API_KEY }}
           STOOQ_API_KEY: ${{ secrets.STOOQ_API_KEY }}
         run: node scripts/update-market-data/index.mjs --market-dir=gh-pages-worktree/market-data
 
