@@ -27,6 +27,8 @@ jobs:
           node-version: 22
 
       - name: Update and validate market data
+        env:
+          STOOQ_API_KEY: ${{ secrets.STOOQ_API_KEY }}
         run: node scripts/update-market-data/index.mjs --market-dir=gh-pages-worktree/market-data
 
       - name: Force push market-data
