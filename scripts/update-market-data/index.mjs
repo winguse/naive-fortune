@@ -168,7 +168,7 @@ const fetchUSFromAlphaVantage = async (code) => {
 
   const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=${encodeURIComponent(
     code.toUpperCase(),
-  )}&outputsize=full&apikey=${encodeURIComponent(alphaVantageApiKey)}`
+  )}&outputsize=compact&apikey=${encodeURIComponent(alphaVantageApiKey)}`
   const response = await fetchWithRetry(url, {
     label: `US ${code} from alpha vantage`,
     retries: 3,
