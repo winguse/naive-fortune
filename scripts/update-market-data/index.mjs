@@ -135,7 +135,11 @@ const fetchWithRetry = async (
 }
 
 const fetchUSFromStooq = async (code) => {
-  const url = `https://stooq.com/q/d/l/?s=${code.toLowerCase()}.us&i=d`
+  const stooqApiKey = process.env.STOOQ_API_KEY?.trim()
+  if (!stooqApiKey) {
+    throw new Error('Missing STOOQ_API_KEY for Stooq request')
+  }
+  const url = `https://stooq.com/q/d/l/?s=${code.toLowerCase()}.us&i=d&apikey=${encodeURIComponent(stooqApiKey)}`
   const response = await fetchWithRetry(url, {
     label: `US ${code} from stooq`,
   })

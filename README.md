@@ -48,6 +48,13 @@ date,close,open
 npm run market-data:update
 ```
 
+如果需要使用 Stooq 数据源，请先设置环境变量 `STOOQ_API_KEY`：
+
+```bash
+export STOOQ_API_KEY=XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+npm run market-data:update
+```
+
 脚本位置：`scripts/update-market-data/index.mjs`
 
 能力：
