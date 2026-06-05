@@ -1,10 +1,6 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 
-async function sleep(t) {
-  return new Promise(resolve => setTimeout(resolve, t))
-}
-
 const MARKET_DATA_LAYOUT = {
   us: ['FXAIX', 'QQQM'],
   cn: ['159399', '159222', '563020', '510050', '510300'],
