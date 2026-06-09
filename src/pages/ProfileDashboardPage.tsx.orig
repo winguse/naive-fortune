@@ -6,7 +6,6 @@ import { DEFAULT_UI_PREFERENCE } from '../config/defaults'
 import { AssetAreaChart } from '../components/AssetAreaChart'
 import { AssetPieChart } from '../components/AssetPieChart'
 import { db } from '../db/database'
-import ReactECharts from 'echarts-for-react'
 import { loadMarketDataBatch } from '../features/market-data/service'
 import {
   buildHistoricalAssetSeries,
@@ -32,7 +31,6 @@ export const ProfileDashboardPage = () => {
   >({})
   const [showCashInPie, setShowCashInPie] = useState(true)
   const [historyRange, setHistoryRange] = useState<HistoryRange>('1y')
-  const [individualEchartsRange, setIndividualEchartsRange] = useState<HistoryRange>('1y')
   const text = isZh
     ? {
         loading: '加载中...',
@@ -127,8 +125,6 @@ export const ProfileDashboardPage = () => {
         y1: '1Y',
         y3: '3Y',
         all: 'All',
-        individualETF: '个别 ETF 价格走势',
-        priceYAxis: '价格',
       }
 
   useEffect(() => {
@@ -273,56 +269,6 @@ export const ProfileDashboardPage = () => {
     )
   }, [historyPoints, historyRange])
 
-  // Get all dates across all ETFs
-  const individualChartDates = useMemo(() => {
-    const dates = new Set<string>()
-    for (const code in marketData) {
-      marketData[code].forEach((c) => dates.add(c.date))
-    }
-    return Array.from(dates).sort()
-  }, [marketData])
-
-  const filteredIndividualChartDates = useMemo(() => {
-     if (individualChartDates.length === 0 || individualEchartsRange === 'all')
-      return individualChartDates
-
-    const endDate = dayjs(individualChartDates[individualChartDates.length - 1])
-    const startDate =
-      individualEchartsRange === '3m'
-        ? endDate.subtract(3, 'month')
-        : individualEchartsRange === '6m'
-          ? endDate.subtract(6, 'month')
-          : individualEchartsRange === '1y'
-            ? endDate.subtract(1, 'year')
-            : endDate.subtract(3, 'year')
-
-    return individualChartDates.filter(
-      (date) => !dayjs(date).isBefore(startDate, 'day'),
-    )
-  }, [individualChartDates, individualEchartsRange])
-
-
-  const individualChartSeries = useMemo(() => {
-    if (!bundle) return []
-    const activeCodes = [...new Set(bundle.targetAllocations.map(t => t.instrumentCode))]
-    return activeCodes.map(code => {
-       const candles = marketData[code] || []
-       // map candle by date for fast lookup
-       const candleMap = new Map<string, number>()
-       candles.forEach(c => candleMap.set(c.date, c.close))
-
-       const data = filteredIndividualChartDates.map(date => {
-         return candleMap.get(date) ?? null
-       })
-       return {
-         name: code,
-         type: 'line',
-         showSymbol: false,
-         data
-       }
-    })
-  }, [bundle, marketData, filteredIndividualChartDates])
-
   if (loading) return <p>{text.loading}</p>
   if (error) return <p className="error">{error}</p>
   if (!bundle?.profile || !snapshot) return <p>{text.notFound}</p>
@@ -463,49 +409,6 @@ export const ProfileDashboardPage = () => {
             cash: point.cash,
           },
         }))}
-      />
-
-      <h3>{text.individualETF || (isZh ? '个别 ETF 价格走势' : 'Individual ETF Price Trends')}</h3>
-      <div className="actions-row">
-        <label>
-          {text.range}
-          <select
-            value={individualEchartsRange}
-            onChange={(event) =>
-              setIndividualEchartsRange(event.target.value as HistoryRange)
-            }
-          >
-            <option value="3m">{text.m3}</option>
-            <option value="6m">{text.m6}</option>
-            <option value="1y">{text.y1}</option>
-            <option value="3y">{text.y3}</option>
-            <option value="all">{text.all}</option>
-          </select>
-        </label>
-      </div>
-      <ReactECharts
-        style={{ height: 360, width: '100%' }}
-        option={{
-          tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
-          legend: {
-             data: individualChartSeries.map(s => s.name),
-             type: 'scroll',
-             bottom: 0
-          },
-          xAxis: {
-            type: 'category',
-            data: filteredIndividualChartDates,
-          },
-          yAxis: {
-            type: 'value',
-            name: text.priceYAxis || (isZh ? '价格' : 'Price'),
-            scale: true
-          },
-          series: individualChartSeries.map(s => ({...s, connectNulls: true})),
-          dataZoom: [
-            { type: 'inside', start: 0, end: 100 }, { start: 0, end: 100 }
-          ]
-        }}
       />
     </section>
   )

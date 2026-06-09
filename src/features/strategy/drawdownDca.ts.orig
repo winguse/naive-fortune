@@ -281,11 +281,11 @@ export const createDrawdownAdjustedSuggestions = ({
               ? fixedBudgetBaseFromAccounts
               : positiveCash
             : staticBudgetBase
-      const investBudget = Math.min(positiveCash,
+      const investBudget =
         budgetBase *
         effectiveBaseDailyInvestRate *
         multiplier *
-        elapsedTradingDaysSinceLastBuy)
+        elapsedTradingDaysSinceLastBuy
       const currentWeight =
         total > 0
           ? (snapshot.marketValueByInstrument[allocation.instrumentCode] ?? 0) /
