@@ -6,7 +6,6 @@ import { ProfileDashboardPage } from '../pages/ProfileDashboardPage'
 import { RecordsPage } from '../pages/RecordsPage'
 import { GlobalSummaryPage } from '../pages/GlobalSummaryPage'
 import { BacktestPage } from '../pages/BacktestPage'
-import { MarketPage } from '../pages/MarketPage'
 
 const Header = () => {
   const location = useLocation()
@@ -20,7 +19,6 @@ const Header = () => {
         dashboard: '仪表盘',
         records: '记录',
         backtest: '回测',
-        market: '市场行情',
       }
     : {
         profileList: 'Profiles',
@@ -29,7 +27,6 @@ const Header = () => {
         dashboard: 'Dashboard',
         records: 'Records',
         backtest: 'Backtest',
-        market: 'Market',
       }
 
   return (
@@ -43,9 +40,6 @@ const Header = () => {
         <nav className="primary-nav">
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'nav-pill active' : 'nav-pill')}>
             {text.profileList}
-          </NavLink>
-          <NavLink to="/market" className={({ isActive }) => (isActive ? 'nav-pill active' : 'nav-pill')}>
-            {text.market}
           </NavLink>
           <NavLink to="/summary" className={({ isActive }) => (isActive ? 'nav-pill active' : 'nav-pill')}>
             {text.globalSummary}
@@ -85,7 +79,6 @@ export default function App() {
           <Route path="/profiles/:profileId/records" element={<RecordsPage />} />
           <Route path="/profiles/:profileId/backtest" element={<BacktestPage />} />
           <Route path="/summary" element={<GlobalSummaryPage />} />
-          <Route path="/market" element={<MarketPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

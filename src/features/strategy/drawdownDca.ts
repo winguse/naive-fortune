@@ -281,18 +281,23 @@ export const createDrawdownAdjustedSuggestions = ({
               ? fixedBudgetBaseFromAccounts
               : positiveCash
             : staticBudgetBase
-      const investBudget =
+      const investBudget = Math.min(positiveCash,
         budgetBase *
         effectiveBaseDailyInvestRate *
         multiplier *
-        elapsedTradingDaysSinceLastBuy
+        elapsedTradingDaysSinceLastBuy)
       const currentWeight =
         total > 0
           ? (snapshot.marketValueByInstrument[allocation.instrumentCode] ?? 0) /
             total
           : 0
       const gap = allocation.targetWeight - currentWeight
+      // Calculate SMA-20
+      const sma20 = candles.length >= 20
+        ? candles.slice(-20).reduce((sum, c) => sum + c.close, 0) / 20
+        : currentPrice
       return {
+        sma20,
         allocation,
         currentPrice,
         drawdown,
@@ -346,6 +351,10 @@ export const createDrawdownAdjustedSuggestions = ({
         : `, remaining budget ${remainderAmount.toFixed(2)} will carry forward`
     }
 
+    const smaNote = candidate.currentPrice > candidate.sma20
+      ? (zh ? `, 价格高于 SMA-20 (${candidate.sma20.toFixed(2)})` : `, Price > SMA-20 (${candidate.sma20.toFixed(2)})`)
+      : (zh ? `, 价格低于 SMA-20 (${candidate.sma20.toFixed(2)})` : `, Price < SMA-20 (${candidate.sma20.toFixed(2)})`)
+
     return {
       instrumentCode: candidate.allocation.instrumentCode,
       action: quantity > 0 ? 'buy' : 'hold',
@@ -362,7 +371,7 @@ export const createDrawdownAdjustedSuggestions = ({
         2,
       )}%, expectedAnnualReturnRef=${(candidate.effectiveExpectedAnnualReturn * 100).toFixed(2)}%, baseDailyInvestRateRef=${(
         candidate.effectiveBaseDailyInvestRate * 100
-      ).toFixed(4)}%, multiplier=${candidate.multiplier.toFixed(2)}${lotNote}`,
+      ).toFixed(4)}%, multiplier=${candidate.multiplier.toFixed(2)}${smaNote}${lotNote}`,
     }
   })
 }
