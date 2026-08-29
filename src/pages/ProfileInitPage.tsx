@@ -1,5 +1,5 @@
 import dayjs from 'dayjs'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useForm, useWatch } from 'react-hook-form'
@@ -7,6 +7,9 @@ import { z } from 'zod'
 import { instrumentsByMarket } from '../config/instruments'
 import { createProfileWithSeed } from '../features/profiles/repository'
 import { isZh } from '../i18n/language'
+import { db } from '../db/database'
+import { createId } from '../lib/id'
+import { createDefaultStrategyConfig } from '../config/defaults'
 
 const formSchema = z.object({
   name: z.string().min(1, '请输入名称'),
@@ -58,6 +61,7 @@ export const ProfileInitPage = () => {
     [instrumentList],
   )
   const defaultInstrumentCode = instrumentList[0]?.code ?? ''
+  
   const text = isZh
     ? {
         noInstrument: '当前市场没有可用标的',
@@ -89,6 +93,7 @@ export const ProfileInitPage = () => {
         weight: '比例',
         addAllocation: '添加目标比例',
         submit: '保存并进入仪表盘',
+        genTest: '生成测试配置',
       }
     : {
         noInstrument: 'No instrument available for this market',
@@ -120,7 +125,47 @@ export const ProfileInitPage = () => {
         weight: 'Weight',
         addAllocation: 'Add Target Allocation',
         submit: 'Save and Enter Dashboard',
+        genTest: 'Generate Test Config',
       }
+
+  const handleGenTest = useCallback(async () => {
+    try {
+        const profile = await createProfileWithSeed({
+            name: 'Testing',
+            market: 'us',
+            baseCurrency: 'USD',
+            initialCash: 10000,
+            initialCashDate: '2024-01-01',
+            holdings: [],
+            allocations: [
+                { instrumentCode: 'FXAIX', targetWeight: 0.6 },
+                { instrumentCode: 'QQQM', targetWeight: 0.4 },
+            ],
+        })
+        // Add extra cash flows
+        await db.cashflows.add({
+            id: createId(),
+            profileId: profile.id,
+            date: '2024-07-01',
+            amount: 5000,
+        })
+        await db.cashflows.add({
+            id: createId(),
+            profileId: profile.id,
+            date: '2025-10-01',
+            amount: 3000,
+        })
+        // Set default strategy
+        await db.strategyConfigs.put({
+            ...createDefaultStrategyConfig(profile.id),
+            sellEnabled: true
+        })
+        
+        navigate(`/profiles/${profile.id}`)
+    } catch (e) {
+        setError(e instanceof Error ? e.message : 'Error generating test')
+    }
+  }, [navigate])
 
   useEffect(() => {
     setHoldingsDrafts((current) =>
@@ -426,7 +471,10 @@ export const ProfileInitPage = () => {
         {formState.errors.name && (
           <p className="error">{formState.errors.name.message}</p>
         )}
-        <button type="submit">{text.submit}</button>
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <button type="submit">{text.submit}</button>
+          <button type="button" onClick={handleGenTest}>{text.genTest}</button>
+        </div>
       </form>
     </section>
   )

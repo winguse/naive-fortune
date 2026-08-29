@@ -10,7 +10,10 @@ import {
 import { db } from '../db/database'
 import { AssetAreaChart } from '../components/AssetAreaChart'
 import { loadMarketDataBatch } from '../features/market-data/service'
-import { runSimpleBacktest } from '../features/backtest/engine'
+import {
+  runSimpleBacktest,
+  type BacktestCalculationStatus,
+} from '../features/backtest/engine'
 import { getProfileBundle } from '../features/profiles/repository'
 import { isZh } from '../i18n/language'
 import type { BacktestConfig } from '../types/models'
@@ -62,11 +65,14 @@ export const BacktestPage = () => {
         thTotalCost: '含费总成本',
         thPlannedPct: '计划买入占现金',
         thCashAfter: '成交后现金',
+        thCashPctAfter: '现金%',
         thClosingMarketValue: '收盘市值',
         thSigma: 'σ（日对数收益波动率）',
         thR: 'r（原始 / 使用）',
         thMultiplier: '回撤倍率',
+        thRebalance: '平衡',
         thStatus: '状态',
+        rebalanceIndicator: '🔄',
         statusBought: '已买入',
         statusNoBudget: '无预算',
         statusZeroQuantity: '数量为 0',
@@ -105,11 +111,14 @@ export const BacktestPage = () => {
         thTotalCost: 'Total Cost (with fees)',
         thPlannedPct: 'Planned Buy / Cash',
         thCashAfter: 'Cash After Trade',
+        thCashPctAfter: 'Cash %',
         thClosingMarketValue: 'Closing Market Value',
         thSigma: 'σ (Daily Log-Return Vol.)',
         thR: 'r (Raw / Used)',
         thMultiplier: 'Drawdown Multiplier',
+        thRebalance: 'Rebal.',
         thStatus: 'Status',
+        rebalanceIndicator: '🔄',
         statusBought: 'Bought',
         statusNoBudget: 'No Budget',
         statusZeroQuantity: 'Zero Quantity',
@@ -184,14 +193,18 @@ export const BacktestPage = () => {
 
   const calculationRows = useMemo(
     () =>
-      (result?.points ?? []).flatMap((point) =>
-        point.calculationDetails.map((detail) => ({
+      (result?.points ?? []).flatMap((point) => {
+        const hasSell = point.sellExecutions.length > 0
+        const nav = point.nav
+        return point.calculationDetails.map((detail) => ({
           date: point.date,
           closingMarketValue:
             point.marketValueByInstrument[detail.instrumentCode] ?? 0,
+          cashPctAfter: nav > 0 ? point.cash / nav : 0,
+          isRebalance: hasSell,
           ...detail,
-        })),
-      ),
+        }))
+      }),
     [result],
   )
 
@@ -268,12 +281,12 @@ export const BacktestPage = () => {
     [closePriceDates, marketData, priceSeriesCodes],
   )
 
-  const statusLabel = (
-    status: 'bought' | 'no_budget' | 'zero_quantity' | 'insufficient_cash',
-  ) => {
+  const statusLabel = (status: BacktestCalculationStatus) => {
     if (status === 'bought') return text.statusBought
+    if (status === 'sold') return isZh ? '已卖出' : 'Sold'
     if (status === 'no_budget') return text.statusNoBudget
     if (status === 'zero_quantity') return text.statusZeroQuantity
+    if (status === 'hold') return isZh ? '保持' : 'Hold'
     return text.statusInsufficientCash
   }
 
@@ -283,8 +296,18 @@ export const BacktestPage = () => {
         const boughtRows = point.calculationDetails.filter(
           (row) => row.status === 'bought' && row.quantity > 0,
         )
-        const tradableCash = boughtRows[0]?.cashBeforeBuy ?? 0
-        if (boughtRows.length === 0 || tradableCash <= 0) {
+        const soldRows = point.calculationDetails.filter(
+          (row) => row.status === 'sold' && row.quantity > 0,
+        )
+
+        const buyAmount = boughtRows.reduce((sum, row) => sum + row.totalCost, 0)
+        const sellAmount = soldRows.reduce(
+          (sum, row) => sum + (row.grossAmount - row.totalCost),
+          0,
+        )
+        const netAmount = buyAmount - sellAmount
+
+        if (boughtRows.length === 0 && soldRows.length === 0) {
           return {
             date: point.date,
             amount: null,
@@ -292,14 +315,12 @@ export const BacktestPage = () => {
           }
         }
 
-        const amount = Math.min(
-          tradableCash,
-          boughtRows.reduce((sum, row) => sum + row.totalCost, 0),
-        )
-        const pct = amount / tradableCash
+        const tradableCash = boughtRows[0]?.cashBeforeAction ?? point.cash
+        const pct = tradableCash > 0 ? netAmount / tradableCash : 0
+
         return {
           date: point.date,
-          amount,
+          amount: netAmount,
           pct,
         }
       }),
@@ -323,7 +344,7 @@ export const BacktestPage = () => {
   const aggregatedBuyTrend = useMemo(() => {
     const amountByPeriod = new Map<string, number>()
     for (const row of buyTrend) {
-      if (row.amount == null || row.amount <= 0) continue
+      if (row.amount == null) continue
       const period = getAggregatePeriod(row.date)
       amountByPeriod.set(period, (amountByPeriod.get(period) ?? 0) + row.amount)
     }
@@ -749,7 +770,9 @@ export const BacktestPage = () => {
                 <th>{text.thQuantity}</th>
                 <th>{text.thTotalCost}</th>
                 <th>{text.thCashAfter}</th>
+                <th>{text.thCashPctAfter}</th>
                 <th>{text.thClosingMarketValue}</th>
+                <th>{text.thRebalance}</th>
                 <th>{text.thStatus}</th>
               </tr>
             </thead>
@@ -769,19 +792,16 @@ export const BacktestPage = () => {
                         : `${(row.trailingVolatility * 100).toFixed(4)}% / ${row.volatilityLookbackDays}d`}
                     </td>
                   ) : null}
-                  <td
-                    title={`μ=${(row.dailyExpectedReturn * 100).toFixed(6)}%`}
-                  >
-                    {(row.rawRate * 100).toFixed(4)}% /{' '}
-                    {(row.rate * 100).toFixed(4)}%
-                  </td>
+                  <td>{(row.rate * 100).toFixed(4)}%</td>
                   <td>{row.multiplier.toFixed(4)}</td>
                   <td>{row.spendBudget.toFixed(2)}</td>
                   <td>{(row.plannedBudgetPctOfCash * 100).toFixed(2)}%</td>
                   <td>{row.quantity.toFixed(4)}</td>
                   <td>{row.totalCost.toFixed(2)}</td>
-                  <td>{row.cashAfterBuy.toFixed(2)}</td>
+                  <td>{(row.cashAfterAction ?? 0).toFixed(2)}</td>
+                  <td>{(row.cashPctAfter * 100).toFixed(2)}%</td>
                   <td>{row.closingMarketValue.toFixed(2)}</td>
+                  <td>{row.isRebalance ? text.rebalanceIndicator : ''}</td>
                   <td>{statusLabel(row.status)}</td>
                 </tr>
               ))}

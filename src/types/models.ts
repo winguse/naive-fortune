@@ -56,6 +56,8 @@ export interface StrategyConfig {
   profileId: string
   expectedAnnualReturn: number
   maxDrawdown: number
+  targetCashRatio?: number
+  totalPlannedPeriods?: number
   baseDailyInvestRate: number
   baseDailyInvestRateMode?: 'fixed_1_252' | 'naive' | 'kelly_variant'
   acceptableMaxDrawdown?: number

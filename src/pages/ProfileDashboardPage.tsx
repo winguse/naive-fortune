@@ -16,7 +16,7 @@ import {
 import { getProfileBundle } from '../features/profiles/repository'
 import { createDefaultStrategyConfig } from '../config/defaults'
 import { createDrawdownAdjustedSuggestions } from '../features/strategy/drawdownDca'
-import { appLanguage, isZh } from '../i18n/language'
+import { isZh } from '../i18n/language'
 
 type HistoryRange = '3m' | '6m' | '1y' | '3y' | 'all'
 
@@ -237,10 +237,7 @@ export const ProfileDashboardPage = () => {
         }),
       allocations: bundle.targetAllocations,
       marketData,
-      cashflows: bundle.cashflows,
-      elapsedTradingDaysSinceLastBuy: elapsedTradingDays,
       lotSizeRuleByInstrument: bundle.backtest?.lotSizeRuleByInstrument ?? {},
-      language: appLanguage,
     })
   }, [bundle, snapshot, marketData, elapsedTradingDays])
 

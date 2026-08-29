@@ -128,6 +128,9 @@ export const RecordsPage = () => {
           '修改有效参数后会立即保存；无效输入会保留在页面上但不会写入数据库。',
         strategyAssumptionsSection: '全局假设',
         strategyDcaSection: '每日投入模型',
+        targetCashRatio: '目标现金比例',
+        totalPlannedPeriods: '总计划交易期数',
+        sellEnabled: '开启自动再平衡（卖出超额）',
         strategyCostSection: '交易成本',
         strategyPreviewSection: '实时预览',
         globalExpectedAnnualReturn: '全局预期年化收益率',
@@ -218,6 +221,9 @@ export const RecordsPage = () => {
           'Valid changes are saved immediately; invalid inputs stay visible but are not written to the database.',
         strategyAssumptionsSection: 'Global Assumptions',
         strategyDcaSection: 'Daily Deployment Model',
+        targetCashRatio: 'Target Cash Ratio',
+        totalPlannedPeriods: 'Total Planned Trading Periods',
+        sellEnabled: 'Enable Auto Rebalance (Sell Overweight)',
         strategyCostSection: 'Trading Costs',
         strategyPreviewSection: 'Realtime Preview',
         globalExpectedAnnualReturn: 'Global Expected Annual Return',
@@ -902,6 +908,50 @@ export const RecordsPage = () => {
                 <option value="naive">{text.dailyRateNaive}</option>
                 <option value="kelly_variant">{text.dailyRateKelly}</option>
               </select>
+            </div>
+            <div className="detail-input-row">
+              <span>{text.targetCashRatio}</span>
+              <input
+                type="number"
+                min="0"
+                max="1"
+                step="0.01"
+                value={strategyConfig.targetCashRatio ?? 0.2}
+                onChange={(event) =>
+                  updateStrategyConfig((current) => ({
+                    ...current,
+                    targetCashRatio: Number(event.target.value),
+                  }))
+                }
+              />
+            </div>
+            <div className="detail-input-row">
+              <span>{text.totalPlannedPeriods}</span>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={strategyConfig.totalPlannedPeriods ?? 250}
+                onChange={(event) =>
+                  updateStrategyConfig((current) => ({
+                    ...current,
+                    totalPlannedPeriods: Math.floor(Number(event.target.value)),
+                  }))
+                }
+              />
+            </div>
+            <div className="detail-input-row">
+              <span>{text.sellEnabled}</span>
+              <input
+                type="checkbox"
+                checked={strategyConfig.sellEnabled}
+                onChange={(event) =>
+                  updateStrategyConfig((current) => ({
+                    ...current,
+                    sellEnabled: event.target.checked,
+                  }))
+                }
+              />
             </div>
             {(strategyConfig.baseDailyInvestRateMode ?? 'fixed_1_252') ===
             'fixed_1_252' ? (

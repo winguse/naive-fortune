@@ -27,6 +27,7 @@ describe('createDrawdownAdjustedSuggestions', () => {
         buyScaleMax: 3,
         sellEnabled: false,
         manualOverrideEnabled: false,
+        totalPlannedPeriods: 250,
       },
       allocations: [
         { profileId: 'p1', instrumentCode: 'FXAIX', targetWeight: 0.3 },
@@ -42,11 +43,11 @@ describe('createDrawdownAdjustedSuggestions', () => {
           { date: '2024-01-02', close: 50 },
         ],
       },
+      currentDayIndex: 0,
     })
 
     expect(result.length).toBeGreaterThan(0)
-    expect(result[0].action).toBe('buy')
-    expect(result.some((item) => item.instrumentCode === 'QQQM')).toBe(true)
+    expect(result.some((item) => item.action === 'buy')).toBe(true)
   })
 
   it('derives sub-account markers from cashflows and proportional withdrawals', () => {
@@ -64,7 +65,7 @@ describe('createDrawdownAdjustedSuggestions', () => {
     ).toBeCloseTo(12000)
   })
 
-  it('uses static principal budgeting for fixed strategy with cashflows', () => {
+  it('uses DBRE budgeting for fixed strategy with cashflows', () => {
     const result = createDrawdownAdjustedSuggestions({
       snapshot: {
         date: '2024-01-02',
@@ -86,6 +87,7 @@ describe('createDrawdownAdjustedSuggestions', () => {
         buyScaleMax: 1,
         sellEnabled: false,
         manualOverrideEnabled: false,
+        totalPlannedPeriods: 250,
       },
       allocations: [
         { profileId: 'p1', instrumentCode: 'FXAIX', targetWeight: 1 },
@@ -96,56 +98,13 @@ describe('createDrawdownAdjustedSuggestions', () => {
           { date: '2024-01-02', close: 100 },
         ],
       },
-      cashflows: [
-        { id: 'c1', profileId: 'p1', date: '2024-01-01', amount: 10000 },
-        { id: 'c2', profileId: 'p1', date: '2024-01-02', amount: 5000 },
-      ],
+      currentDayIndex: 100, // 150 days remaining
     })
 
-    expect(result[0].estimatedAmount).toBeCloseTo(15000 / 252, 6)
+    expect(result[0].estimatedAmount).toBeCloseTo(16000 / 150, 4)
   })
 
-  it('uses initial principal (not remaining) for fixed_1_252 after withdrawal', () => {
-    const result = createDrawdownAdjustedSuggestions({
-      snapshot: {
-        date: '2024-01-02',
-        holdings: {},
-        prices: { FXAIX: 100 },
-        marketValueByInstrument: { FXAIX: 0 },
-        totalMarketValue: 0,
-        cash: 12000,
-      },
-      strategy: {
-        profileId: 'p1',
-        expectedAnnualReturn: 0.08,
-        maxDrawdown: 0.3,
-        baseDailyInvestRate: 1 / 252,
-        baseDailyInvestRateMode: 'fixed_1_252',
-        acceptableMaxDrawdown: 0,
-        volatilityLookbackDays: 20,
-        buyScaleMin: 1,
-        buyScaleMax: 1,
-        sellEnabled: false,
-        manualOverrideEnabled: false,
-      },
-      allocations: [
-        { profileId: 'p1', instrumentCode: 'FXAIX', targetWeight: 1 },
-      ],
-      marketData: {
-        FXAIX: [
-          { date: '2024-01-01', close: 100 },
-          { date: '2024-01-02', close: 100 },
-        ],
-      },
-      cashflows: [
-        { id: 'c1', profileId: 'p1', date: '2024-01-01', amount: 10000 },
-        { id: 'c2', profileId: 'p1', date: '2024-01-05', amount: 5000 },
-        { id: 'c3', profileId: 'p1', date: '2024-01-10', amount: -3000 },
-      ],
-    })
 
-    expect(result[0].estimatedAmount).toBeCloseTo(15000 / 252, 6)
-  })
 
   it('uses total-asset budgeting for kelly strategy', () => {
     const result = createDrawdownAdjustedSuggestions({
@@ -180,9 +139,6 @@ describe('createDrawdownAdjustedSuggestions', () => {
           { date: '2024-01-03', close: 95 },
         ],
       },
-      cashflows: [
-        { id: 'c1', profileId: 'p1', date: '2024-01-01', amount: 10000 },
-      ],
     })
 
     expect(result[0].estimatedAmount).toBeGreaterThan(0)

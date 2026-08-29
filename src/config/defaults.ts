@@ -32,6 +32,8 @@ export const createDefaultStrategyConfig = (
   profileId,
   expectedAnnualReturn: overrides.expectedAnnualReturn ?? 0.08,
   maxDrawdown: overrides.maxDrawdown ?? 0.3,
+  targetCashRatio: 0.2,
+  totalPlannedPeriods: 250,
   baseDailyInvestRate: 1 / 252,
   baseDailyInvestRateMode: 'fixed_1_252',
   acceptableMaxDrawdown: 0,

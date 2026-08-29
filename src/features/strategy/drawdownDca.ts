@@ -5,7 +5,6 @@ import type {
   StrategyConfig,
   TargetAllocation,
 } from '../../types/models'
-import type { AppLanguage } from '../../i18n/language'
 import type { PortfolioSnapshot } from '../portfolio/calc'
 import { applyLotSizeRule } from '../backtest/engine'
 
@@ -205,173 +204,89 @@ export const createDrawdownAdjustedSuggestions = ({
   strategy,
   allocations,
   marketData,
-  cashflows = [],
-  elapsedTradingDaysSinceLastBuy = 1,
   lotSizeRuleByInstrument = {},
-  language = 'en-US',
+  currentDayIndex = 0,
 }: {
   snapshot: PortfolioSnapshot
   strategy: StrategyConfig
   allocations: TargetAllocation[]
   marketData: Record<string, MarketCandle[]>
-  cashflows?: CashflowRecord[]
-  elapsedTradingDaysSinceLastBuy?: number
   lotSizeRuleByInstrument?: Record<string, BacktestLotSizeRule>
-  language?: AppLanguage
+  currentDayIndex?: number
 }): StrategySuggestion[] => {
-  const positiveCash = Math.max(snapshot.cash, 0)
-  if (positiveCash <= 0 || allocations.length === 0) return []
+  const totalMarketValue = snapshot.totalMarketValue
+  const totalCash = Math.max(snapshot.cash, 0)
+  const totalValue = totalMarketValue + totalCash
+  
+  if (totalValue <= 0 || allocations.length === 0) return []
 
-  const total = snapshot.totalMarketValue + positiveCash
-  const zh = language === 'zh-CN'
-  const mode = strategy.baseDailyInvestRateMode ?? 'fixed_1_252'
-  const subAccounts = deriveSubAccountsFromCashflows(cashflows)
-  const fixedBudgetBaseFromAccounts = subAccounts.reduce(
-    (sum, account) => sum + account.initialPrincipal,
-    0,
-  )
-  const staticBudgetBaseFromAccounts = subAccounts.reduce(
-    (sum, account) => sum + account.currentPrincipal,
-    0,
-  )
-  const staticBudgetBase =
-    staticBudgetBaseFromAccounts > 0
-      ? staticBudgetBaseFromAccounts
-      : positiveCash
-  const kellyBudgetBase = Math.max(snapshot.totalMarketValue + snapshot.cash, 0)
+  const targetCashRatio = strategy.targetCashRatio ?? 0.2
+  const targetRiskyRatio = 1 - targetCashRatio
+  const targetCashReserve = totalValue * targetCashRatio
+  const investableCash = Math.max(totalCash - targetCashReserve, 0)
 
-  const candidates = allocations
-    .map((allocation) => {
-      const candles = marketData[allocation.instrumentCode] ?? []
-      const currentPrice = candles.at(-1)?.close ?? 0
-      const rollingPeak = candles.reduce(
-        (max, row) => Math.max(max, row.close),
-        0,
-      )
-      const drawdown = rollingPeak > 0 ? 1 - currentPrice / rollingPeak : 0
-      const instrumentStrategy =
-        strategy.instrumentOverrides?.[allocation.instrumentCode]
-      const effectiveMaxDrawdown =
-        instrumentStrategy?.maxDrawdown ?? strategy.maxDrawdown
-      const effectiveExpectedAnnualReturn =
-        instrumentStrategy?.expectedAnnualReturn ??
-        strategy.expectedAnnualReturn
-      const effectiveBaseDailyInvestRate = resolveBaseDailyInvestRate({
-        strategy,
-        expectedAnnualReturn: effectiveExpectedAnnualReturn,
-        maxDrawdown: effectiveMaxDrawdown,
-        candles,
-      })
-      const ddRatio = clamp(
-        drawdown / Math.max(effectiveMaxDrawdown, 0.0001),
-        0,
-        1.5,
-      )
-      const multiplier = clamp(
-        strategy.buyScaleMin +
-          (strategy.buyScaleMax - strategy.buyScaleMin) * (ddRatio / 1.5),
-        strategy.buyScaleMin,
-        strategy.buyScaleMax,
-      )
-      const budgetBase =
-        mode === 'kelly_variant'
-          ? kellyBudgetBase
-          : mode === 'fixed_1_252'
-            ? fixedBudgetBaseFromAccounts > 0
-              ? fixedBudgetBaseFromAccounts
-              : positiveCash
-            : staticBudgetBase
-      const investBudget = Math.min(positiveCash,
-        budgetBase *
-        effectiveBaseDailyInvestRate *
-        multiplier *
-        elapsedTradingDaysSinceLastBuy)
-      const currentWeight =
-        total > 0
-          ? (snapshot.marketValueByInstrument[allocation.instrumentCode] ?? 0) /
-            total
-          : 0
-      const gap = allocation.targetWeight - currentWeight
-      // Calculate SMA-20
-      const sma20 = candles.length >= 20
-        ? candles.slice(-20).reduce((sum, c) => sum + c.close, 0) / 20
-        : currentPrice
+  // DBRE: Remaining Days Re-averaging
+  const totalPlannedPeriods = strategy.totalPlannedPeriods ?? 250
+  const T_remain = Math.max(totalPlannedPeriods - currentDayIndex, 1)
+  const investBudget = investableCash / T_remain
+
+  // Rebalancing: check for sell actions
+  const rebalanceThreshold = 0.05 // 5% deviation
+
+  const suggestions: StrategySuggestion[] = allocations.map((allocation) => {
+    const candles = marketData[allocation.instrumentCode] ?? []
+    const currentPrice = candles.at(-1)?.close ?? 0
+    const currentWeight = totalValue > 0 ? (snapshot.marketValueByInstrument[allocation.instrumentCode] ?? 0) / totalValue : 0
+    const absoluteTargetWeight = allocation.targetWeight * targetRiskyRatio
+    const gap = absoluteTargetWeight - currentWeight
+
+    if (Math.abs(gap) < rebalanceThreshold) {
       return {
-        sma20,
-        allocation,
-        currentPrice,
-        drawdown,
-        ddRatio,
-        multiplier,
-        investBudget,
-        currentWeight,
-        gap,
-        effectiveMaxDrawdown,
-        effectiveExpectedAnnualReturn,
-        effectiveBaseDailyInvestRate,
+        instrumentCode: allocation.instrumentCode,
+        action: 'hold',
+        quantity: 0,
+        estimatedPrice: currentPrice,
+        estimatedAmount: 0,
+        rationale: `Within rebalance threshold. CurrentWeight=${(currentWeight * 100).toFixed(2)}%, Target=${(absoluteTargetWeight * 100).toFixed(2)}%`,
       }
-    })
-    .filter((candidate) => candidate.currentPrice > 0 && candidate.gap > 0)
-    .sort((a, b) => b.gap - a.gap)
-
-  if (candidates.length === 0) return []
-
-  const totalGap = candidates.reduce((sum, item) => sum + item.gap, 0)
-
-  return candidates.map((candidate) => {
-    const budgetShare =
-      totalGap > 0 ? candidate.gap / totalGap : 1 / candidates.length
-    const estimatedAmount = Math.min(
-      positiveCash,
-      candidate.investBudget * budgetShare,
-    )
-    const lotRule: BacktestLotSizeRule =
-      lotSizeRuleByInstrument[candidate.allocation.instrumentCode] ??
-      'fractional'
-    const rawQuantity = estimatedAmount / candidate.currentPrice
-    const quantity = applyLotSizeRule(rawQuantity, lotRule)
-
-    let lotNote = ''
-    if (lotRule !== 'fractional' && quantity === 0 && rawQuantity > 0) {
-      const minLot = lotRule === 'lot100' ? 100 : 1
-      const singleDayBudget =
-        estimatedAmount / Math.max(elapsedTradingDaysSinceLastBuy, 1)
-      const amountNeeded = minLot * candidate.currentPrice
-      const extraDays =
-        singleDayBudget > 0
-          ? Math.ceil((amountNeeded - estimatedAmount) / singleDayBudget)
-          : 0
-      lotNote = zh
-        ? `, 还需约 ${extraDays} 个交易日积累预算才能下单`
-        : `, about ${extraDays} more trading day(s) of budget accumulation needed before execution`
-    } else if (lotRule !== 'fractional' && quantity > 0) {
-      const remainderAmount = (rawQuantity - quantity) * candidate.currentPrice
-      lotNote = zh
-        ? `, 余额约 ${remainderAmount.toFixed(2)} 继续积累`
-        : `, remaining budget ${remainderAmount.toFixed(2)} will carry forward`
     }
 
-    const smaNote = candidate.currentPrice > candidate.sma20
-      ? (zh ? `, 价格高于 SMA-20 (${candidate.sma20.toFixed(2)})` : `, Price > SMA-20 (${candidate.sma20.toFixed(2)})`)
-      : (zh ? `, 价格低于 SMA-20 (${candidate.sma20.toFixed(2)})` : `, Price < SMA-20 (${candidate.sma20.toFixed(2)})`)
-
-    return {
-      instrumentCode: candidate.allocation.instrumentCode,
-      action: quantity > 0 ? 'buy' : 'hold',
-      quantity,
-      estimatedPrice: candidate.currentPrice,
-      estimatedAmount: quantity * candidate.currentPrice,
-      rationale: `drawdown=${(candidate.drawdown * 100).toFixed(2)}%, ddRatio=${candidate.ddRatio.toFixed(2)}, currentWeight=${(
-        candidate.currentWeight * 100
-      ).toFixed(
-        2,
-      )}%, targetWeight=${(candidate.allocation.targetWeight * 100).toFixed(2)}%, maxDrawdownRef=${(
-        candidate.effectiveMaxDrawdown * 100
-      ).toFixed(
-        2,
-      )}%, expectedAnnualReturnRef=${(candidate.effectiveExpectedAnnualReturn * 100).toFixed(2)}%, baseDailyInvestRateRef=${(
-        candidate.effectiveBaseDailyInvestRate * 100
-      ).toFixed(4)}%, multiplier=${candidate.multiplier.toFixed(2)}${smaNote}${lotNote}`,
+    if (gap > 0) {
+      // Buy
+      const estimatedAmount = Math.min(totalCash, investBudget * (allocation.targetWeight)) // Use instrument's share of risky part
+      const quantity = applyLotSizeRule(estimatedAmount / currentPrice, lotSizeRuleByInstrument[allocation.instrumentCode] ?? 'fractional')
+      return {
+        instrumentCode: allocation.instrumentCode,
+        action: 'buy',
+        quantity,
+        estimatedPrice: currentPrice,
+        estimatedAmount: quantity * currentPrice,
+        rationale: `Rebalancing: Underweight. Gap=${(gap * 100).toFixed(2)}%`,
+      }
+    } else {
+      // Sell
+      if (!strategy.sellEnabled) {
+        return {
+          instrumentCode: allocation.instrumentCode,
+          action: 'hold',
+          quantity: 0,
+          estimatedPrice: currentPrice,
+          estimatedAmount: 0,
+          rationale: `Overweight but selling disabled. Gap=${(gap * 100).toFixed(2)}%`,
+        }
+      }
+      const sellAmount = Math.abs(gap) * totalValue
+      const quantity = applyLotSizeRule(sellAmount / currentPrice, lotSizeRuleByInstrument[allocation.instrumentCode] ?? 'fractional')
+      return {
+        instrumentCode: allocation.instrumentCode,
+        action: 'sell',
+        quantity,
+        estimatedPrice: currentPrice,
+        estimatedAmount: quantity * currentPrice,
+        rationale: `Rebalancing: Overweight. Gap=${(gap * 100).toFixed(2)}%`,
+      }
     }
   })
+
+  return suggestions.filter(s => s.action !== 'hold')
 }
